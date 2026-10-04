@@ -4,7 +4,7 @@
 # Per rinominare l'app basta cambiare NAME e BUNDLE_ID qui sotto.
 # SDK 15.2: con il solo CommandLineTools gli SDK più recenti non trovano il plugin dei macro di SwiftUI (@State).
 set -e; cd "$(dirname "$0")"
-NAME="Dolly Projector"; EXE=Dolly; BUNDLE_ID=app.dollyprojector.Dolly; VERSION=${VERSION:-0.1.0}   # EXE: nome del programma dentro il pacchetto
+NAME="Dolly Projector"; EXE=Dolly; BUNDLE_ID=app.dollyprojector.Dolly; VERSION=${VERSION:-0.2.0}   # EXE: nome del programma dentro il pacchetto
 SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk
 A="dist/$NAME.app"; rm -rf "$A"; mkdir -p "$A/Contents/MacOS" "$A/Contents/Resources"
 # target 13.0 anche per x86_64: sotto, il CommandLineTools qui installato non ha le librerie di compatibilità x86_64
@@ -23,7 +23,7 @@ cat > "$A/Contents/Info.plist" <<P
 <plist version="1.0"><dict><key>CFBundleName</key><string>$NAME</string><key>CFBundleDisplayName</key><string>$NAME</string><key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
 <key>CFBundleExecutable</key><string>$EXE</string><key>CFBundleIconFile</key><string>Dolly</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>$VERSION</string><key>CFBundleShortVersionString</key><string>$VERSION</string>
 <key>LSMinimumSystemVersion</key><string>$MIN_OS</string><key>LSApplicationCategoryType</key><string>public.app-category.video</string><key>NSHighResolutionCapable</key><true/>
-<key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>
+<key>NSLocalNetworkUsageDescription</key><string>Il telecomando dal telefono usa la rete locale per comandare la proiezione.</string><key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>
 P
 codesign --force --deep -s - "$A" 2>/dev/null || true                 # firma ad-hoc; per la distribuzione pubblica servono firma Developer ID e notarizzazione
 ZIP="Dolly-Projector.zip"; rm -f "dist/Dolly.zip" "dist/$ZIP"; (cd dist && ditto -c -k --keepParent "$NAME.app" "$ZIP")

@@ -483,6 +483,46 @@ def t_loop_film():
         check(s.state()["restarts"] == 0, "nessun riavvio")
     finally: s.stop()
 
+def t_remote():
+    """Telecomando dal telefono: PIN, accesso, comandi ammessi e rifiutati, stato ridotto, anteprima."""
+    import urllib.error
+    s = Srv(MEDIA, files=["01_a.mp4", "04_d.mp4"], screen_args=("--screen", "0", "--windowed", "--remote"))
+    base = "http://127.0.0.1:8484"
+    def call(path, body=None, tok=None):
+        rq = urllib.request.Request(base + path, json.dumps(body).encode() if body is not None else None, {"X-Token": tok} if tok else {})
+        try:
+            r = urllib.request.urlopen(rq, timeout=6); return r.status, r.read()
+        except urllib.error.HTTPError as e: return e.code, e.read()
+    try:
+        time.sleep(.5)
+        cfg = json.load(open(os.path.join(s.home, "remote.json"))); pin = cfg["pin"]
+        check(len(pin) == 4 and pin.isdigit(), f"il PIN è di 4 cifre ({pin})")
+        c, b = call("/"); check(c == 200 and b"Dolly Projector" in b, "la pagina del telecomando viene servita")
+        check(b"://" not in b, "la pagina non contiene richieste esterne (funziona senza internet)")
+        check(call("/api/state")[0] == 401, "senza accesso lo stato è rifiutato")
+        check(call("/api/cmd", {"a": "toggle"})[0] == 401, "senza accesso i comandi sono rifiutati")
+        c, b = call("/api/login", {"pin": "x" + pin}); check(c == 401, "PIN errato rifiutato")
+        c, b = call("/api/login", {"pin": pin}); tok = json.loads(b).get("token") if c == 200 else None
+        check(bool(tok), "PIN giusto: arriva il token")
+        c, b = call("/api/state", tok=tok); st = json.loads(b)
+        check(c == 200 and set(st) >= {"mode", "items", "props", "time", "dur"} and "folder" not in st and "lib" not in st, "stato ridotto: niente cartelle né elenco della libreria")
+        c, b = call("/api/cmd", {"a": "play", "i": 0}, tok); check(c == 200, "play dal telefono")
+        st2 = s.wait(lambda x: x["mode"] == "playing" and x["time"] > .3, 8); check(st2 is not None, "il film parte davvero")
+        call("/api/cmd", {"a": "toggle"}, tok); st3 = s.wait(lambda x: x.get("pause"), 4); check(st3 is not None, "pausa dal telefono")
+        call("/api/cmd", {"a": "toggle"}, tok); check(s.wait(lambda x: not x.get("pause"), 4) is not None, "riprende dal telefono")
+        call("/api/cmd", {"a": "set", "p": "volume", "v": 40}, tok); check(s.wait(lambda x: abs((x["props"].get("volume") or 0) - 40) < 1, 4) is not None, "volume dal telefono")
+        c, _ = call("/api/cmd", {"a": "setitem", "i": 0, "loop": -1}, tok); check(c == 200 and s.state()["items"][0]["loop"] == -1, "ripeti film dal telefono")
+        c, b = call("/api/cmd", {"a": "clear"}, tok); check(c == 400 and len(s.state()["items"]) == 2, "il comando 'svuota la scena' è rifiutato")
+        c, b = call("/api/cmd", {"a": "add", "paths": ["/etc"]}, tok); check(c == 400, "aggiungere file è rifiutato")
+        c, b = call("/api/cmd", {"a": "set", "p": "sub-font", "v": "x"}, tok); check(c == 400, "impostazioni diverse da volume/muto rifiutate")
+        c, b = call("/api/cmd", {"a": "setitem", "i": 0, "pre": 99}, tok); check(c == 400, "setitem con campi diversi da 'loop' rifiutato")
+        c, b = call("/api/preview", tok=tok); check(c in (200, 204), f"anteprima raggiungibile (codice {c})")
+        c, _ = call("/api/state", tok="0" * 32); check(c == 401, "un token inventato non funziona")
+        for _ in range(6): call("/api/login", {"pin": "0000x"})
+        c, _ = call("/api/login", {"pin": pin}); check(c == 429, "dopo troppi tentativi sbagliati il PIN giusto viene bloccato per un po'")
+        c, _ = call("/api/state", tok=tok); check(c == 200, "ma chi è già collegato continua a funzionare")
+    finally: s.stop()
+
 def t_orphan():
     """Se lo script viene ucciso di forza, al riavvio il vecchio mpv rimasto sullo schermo viene chiuso."""
     s = Srv(MEDIA, files=["01_a.mp4"])
@@ -537,7 +577,7 @@ def t_soak(minutes):
         if len(samples) > 3: check(samples[-1][0] < samples[1][0] * 1.6 + 30 and samples[-1][1] < samples[1][1] * 1.6 + 100, f"memoria stabile python/mpv MB: {samples[1]} → {samples[-1]}")
     finally: s.stop()
 
-TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash,
+TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote,
          "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film}
 
 def main():

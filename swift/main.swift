@@ -14,6 +14,7 @@ if let p = argValue("--test-api"), let port = UInt16(p) {
         let engine = try Engine(folder: folder, mpvBinary: mpvBinary, extra: extra, windowed: CommandLine.arguments.contains("--windowed"),
                                 screen: Int(argValue("--screen") ?? "0") ?? 0, autoresume: CommandLine.arguments.contains("--autoresume"), resetPlaylist: CommandLine.arguments.contains("--reset-playlist"))
         try TestServer(engine: engine, port: port).start()
+        RemoteControl.shared.engine = engine; if CommandLine.arguments.contains("--remote") { RemoteControl.shared.setEnabled(true) }   // telecomando da telefono, solo se richiesto
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
             let s = DispatchSource.makeSignalSource(signal: sig, queue: .main); s.setEventHandler { engine.shutdown(); exit(0) }; s.resume()

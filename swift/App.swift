@@ -87,14 +87,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             self.startGroup.leave()
             DispatchQueue.main.async {
                 self.model.starting = false
-                switch r { case .success(let e): self.model.engine = e; self.moveControlsAway(); case .failure(let e): showError("Non riesco ad avviare il player: \(e)") }
+                switch r { case .success(let e): self.model.engine = e; RemoteControl.shared.engine = e; self.moveControlsAway(); case .failure(let e): showError("Non riesco ad avviare il player: \(e)") }
             }
         }
     }
     func stopEngine() {
         _ = startGroup.wait(timeout: .now() + 30)
         liveLock.lock(); let e = live; live = nil; liveLock.unlock()
-        e?.shutdown(); model.engine = nil
+        RemoteControl.shared.engine = nil; e?.shutdown(); model.engine = nil
     }
     func restartEngine() {
         confirm("Cambiare impostazione interrompe la proiezione in corso. Continuare?", ok: "Continua") {

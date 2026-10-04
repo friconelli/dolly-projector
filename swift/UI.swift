@@ -616,6 +616,7 @@ struct MoreTab: View {
                 Button { engine.send(["a": "frame"]) } label: { Image(systemName: "forward.frame") }.help("Un fotogramma avanti")
             }
         }
+        RemoteCard()
         Card(title: "Messaggio sullo schermo della sala", symbol: "text.bubble") {
             HStack { TextField("Es. Si prega di spegnere i cellulari", text: $msg).textFieldStyle(.roundedBorder); Button("Mostra 8″") { engine.send(["a": "text", "v": msg, "ms": 8000]) } }
         }
