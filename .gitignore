@@ -1,0 +1,4 @@
+dist/
+__pycache__/
+npm-cache/
+.DS_Store
