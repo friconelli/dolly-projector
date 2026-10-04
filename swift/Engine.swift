@@ -322,6 +322,10 @@ final class Engine: ObservableObject {
         case "resetsubstyle":   // torna allo stile iniziale e dimentica quello salvato
             for (p, v) in Engine.subStyleDefaults { prefs.removeValue(forKey: p); try mpv.ipc([["set_property", p, v]]) }
         case "setmany": for (p, v) in (d["props"] as? [String: Any] ?? [:]) { try setProp(p, v) }
+        case "subadd":   // carica subito un sottotitolo appena scaricato, se è il film in corso
+            if let p = asString(d["path"]), p.hasSuffix(".srt"), FileManager.default.fileExists(atPath: p), let f = asString(d["film"]), mode == "playing", items.indices.contains(idx), items[idx].path == f {
+                try mpv.ipc([["sub-add", p, "select"]])
+            }
         case "text": try mpv.ipc([["show-text", String((asString(d["v"]) ?? "").prefix(200)), asInt(d["ms"]) ?? 5000]])
         case "resetvideo":
             for p in ["brightness", "contrast", "saturation", "gamma", "hue", "video-zoom", "video-pan-x", "video-pan-y", "panscan"] { try setProp(p, 0) }
@@ -375,7 +379,7 @@ final class Engine: ObservableObject {
             "auto": auto, "loop": loop, "defsub": defsub, "pid": Int(mpv.proc?.processIdentifier ?? 0), "defpre": defpre, "defpost": defpost, "resume": resume as Any? ?? NSNull(), "folder": folder,
             "items": items.map { i -> [String: Any] in
                 ["kind": i.kind, "pre": i.pre as Any? ?? NSNull(), "post": i.post as Any? ?? NSNull(), "vol": i.vol as Any? ?? NSNull(), "alang": i.alang, "slang": i.slang,
-                 "secs": i.secs, "text": i.text, "name": i.title, "ok": i.kind != "film" || FileManager.default.fileExists(atPath: i.path), "loop": i.loop, "submode": i.submode as Any? ?? NSNull()] },
+                 "secs": i.secs, "text": i.text, "name": i.title, "path": i.path, "ok": i.kind != "film" || FileManager.default.fileExists(atPath: i.path), "loop": i.loop, "submode": i.submode as Any? ?? NSNull()] },
             "lib": videosIn(folder).map { ($0 as NSString).lastPathComponent }, "saved": savedLists(),
             "playing": false, "pause": false, "time": 0.0, "dur": 0.0, "audio": [Any](), "sub": [Any](), "video": [Any](), "chapters": [Any](),
             "chapter": NSNull(), "ab": [NSNull(), NSNull()], "props": [String: Any](), "adevs": [Any](), "info": [String: Any]()]

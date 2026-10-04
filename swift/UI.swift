@@ -519,6 +519,7 @@ struct SubsTab: View {
             PropSlider(engine: engine, prop: "sub-delay", label: "Ritardo", range: -10...10, step: 0.1, reset: 0, fmtv: { String(format: "%.1f s", $0) })
             Toggle("Mostra sottotitoli", isOn: Binding(get: { s.props["sub-visibility"]?.b ?? true }, set: { engine.send(["a": "set", "p": "sub-visibility", "v": $0]) })).toggleStyle(.switch)
         }
+        SubsDownloadCard(engine: engine)
         SubStyle(engine: engine)
     }
 }

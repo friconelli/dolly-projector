@@ -558,6 +558,71 @@ def t_update():
         o = run({"version": "9.9.9", "url": "http://example.com/x.zip", "sha256": sha}, dl=False); check("non valida" in o.get("error", ""), "un indirizzo http non locale è rifiutato")
     finally: h.shutdown()
 
+def t_sottotitoli_online():
+    """Scarico dei sottotitoli: hash del file, titolo/anno dal nome, ricerca, login, scarico, codifica UTF-8, destinazione senza sovrascritture, errori."""
+    import http.server, struct, urllib.parse
+    d = tempfile.mkdtemp(prefix="dolly-subs-")
+    film = os.path.join(d, "Aftersun (2022 - Charlotte Wells).mkv")
+    data = os.urandom(400000); open(film, "wb").write(data)
+    def oshash(b):
+        h = len(b)
+        for chunk in (b[:65536], b[-65536:]):
+            for (x,) in struct.iter_unpack("<Q", chunk[:len(chunk) // 8 * 8]): h = (h + x) & 0xFFFFFFFFFFFFFFFF
+        return "%016x" % h
+    expect = oshash(data); log = {"search": None, "headers_ok": True, "logins": 0}
+    SRT = "1\n00:00:01,000 --> 00:00:03,000\nÈ già così, perché sì.\n"
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(s, *a): pass
+        def out(s, code, obj=None, raw=None):
+            body = raw if raw is not None else json.dumps(obj or {}).encode(); s.send_response(code); s.send_header("Content-Length", str(len(body))); s.end_headers(); s.wfile.write(body)
+        def do_GET(s):
+            u = urllib.parse.urlparse(s.path); q = dict(urllib.parse.parse_qsl(u.query))
+            if u.path == "/subtitles":
+                if s.headers.get("Api-Key") != "KEY123" or not s.headers.get("User-Agent", "").startswith("DollyProjector"): log["headers_ok"] = False; return s.out(403, {"message": "bad key"})
+                log["search"] = q
+                return s.out(200, {"data": [
+                    {"attributes": {"language": "it", "release": "Aftersun.2022.WEBRip", "download_count": 9000, "ratings": 8, "moviehash_match": False, "hearing_impaired": False, "files": [{"file_id": 111, "file_name": "a.srt"}]}},
+                    {"attributes": {"language": "it", "release": "Aftersun.2022.mkv", "download_count": 50, "ratings": 6, "moviehash_match": q.get("moviehash") == expect, "hearing_impaired": True, "files": [{"file_id": 222, "file_name": "b.srt"}]}}]})
+            if u.path.startswith("/files/"):
+                fid = u.path.split("/")[-1].split(".")[0]
+                return s.out(200, raw=SRT.encode("cp1252") if fid == "222" else SRT.encode("utf-8-sig"))
+            s.out(404)
+        def do_POST(s):
+            n = int(s.headers.get("Content-Length", 0)); b = json.loads(s.rfile.read(n) or b"{}")
+            if s.path == "/login":
+                log["logins"] += 1
+                return s.out(200, {"token": "TOK"}) if (b.get("username"), b.get("password")) == ("me", "pw") else s.out(401, {"message": "bad login"})
+            if s.path == "/download":
+                if s.headers.get("Authorization") != "Bearer TOK" or s.headers.get("Api-Key") != "KEY123": return s.out(401, {"message": "auth"})
+                if b.get("file_id") == 999: return s.out(406, {"message": "quota"})
+                return s.out(200, {"link": f"http://127.0.0.1:8897/files/{b['file_id']}.srt", "remaining": 5})
+            s.out(404)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 8897), H); threading.Thread(target=srv.serve_forever, daemon=True).start()
+    bin_ = os.environ["DOLLY_BIN"]
+    def run(*extra, key="KEY123", pw="pw"):
+        r = subprocess.run([bin_, "--selftest-subs", "--path", film, *extra], capture_output=True, text=True, timeout=60,
+                           env=dict(os.environ, DOLLY_SUBS_URL="http://127.0.0.1:8897", DOLLY_OS_KEY=key, DOLLY_OS_USER="me", DOLLY_OS_PASS=pw, DOLLY_VERSION="0.2.2"))
+        try: return json.loads(r.stdout.strip().splitlines()[-1])
+        except Exception: return {"error": r.stdout + r.stderr}
+    try:
+        o = run("--lang", "it")
+        check(o.get("hash") == expect, f"hash OpenSubtitles identico a quello di riferimento ({o.get('hash')})")
+        check(o.get("title") == "Aftersun" and o.get("year") == 2022, f"titolo e anno dal nome del file ({o.get('title')}, {o.get('year')})")
+        q = log["search"] or {}
+        check(q.get("query") == "Aftersun" and q.get("year") == "2022" and q.get("languages") == "it" and q.get("moviehash") == expect, f"la ricerca invia titolo, anno, lingua e hash ({q})")
+        check(log["headers_ok"], "ogni richiesta porta chiave API e User-Agent dell'app")
+        rs = o.get("results", []); check(len(rs) == 2 and rs[0]["id"] == 222 and rs[0]["exact"], "i risultati per il file esatto vengono per primi")
+        o = run("--lang", "it", "--download", "222")
+        p = o.get("saved", ""); check(p.endswith("Aftersun (2022 - Charlotte Wells).it.srt") and os.path.dirname(p) == d, f"salvato accanto al film con nome 'Film.it.srt' ({os.path.basename(p)})")
+        check("È già così, perché sì." in open(p, encoding="utf-8").read(), "un .srt in codifica Windows viene convertito in UTF-8 senza rovinare gli accenti")
+        o = run("--lang", "it", "--download", "111"); p2 = o.get("saved", "")
+        check(p2.endswith(".it.2.srt") and os.path.exists(p), "se il file esiste già non lo sovrascrive: crea '.it.2.srt'")
+        check(not open(p2, "rb").read(3) == b"\xef\xbb\xbf", "il BOM UTF-8 viene tolto")
+        o = run("--lang", "it", "--download", "999"); check("giornalieri" in o.get("error", ""), "limite di scaricamenti: messaggio chiaro")
+        o = run("--lang", "it", key="SBAGLIATA"); check("non valida" in o.get("error", ""), "chiave API errata: messaggio chiaro")
+        o = run("--lang", "it", "--download", "111", pw="x"); check("password" in o.get("error", "").lower(), "password errata: messaggio chiaro")
+    finally: srv.shutdown()
+
 def t_orphan():
     """Se lo script viene ucciso di forza, al riavvio il vecchio mpv rimasto sullo schermo viene chiuso."""
     s = Srv(MEDIA, files=["01_a.mp4"])
@@ -612,7 +677,7 @@ def t_soak(minutes):
         if len(samples) > 3: check(samples[-1][0] < samples[1][0] * 1.6 + 30 and samples[-1][1] < samples[1][1] * 1.6 + 100, f"memoria stabile python/mpv MB: {samples[1]} → {samples[-1]}")
     finally: s.stop()
 
-TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "update": t_update,
+TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "update": t_update, "sottotitoli_online": t_sottotitoli_online,
          "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film}
 
 def main():

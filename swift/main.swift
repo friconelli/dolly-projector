@@ -14,6 +14,20 @@ if CommandLine.arguments.contains("--selftest-update") {
     } catch { print("{\"error\": \"\(error)\"}"); exit(2) }
 }
 
+// Collaudo dei sottotitoli senza finestre: --selftest-subs --path FILM --lang it [--download ID]
+if CommandLine.arguments.contains("--selftest-subs") {
+    let film = argValue("--path") ?? "", lang = argValue("--lang") ?? "it"
+    var o: [String: Any] = ["hash": Subtitles.movieHash(film) as Any? ?? NSNull(), "title": Subtitles.guess(film).title, "year": Subtitles.guess(film).year as Any? ?? NSNull()]
+    do {
+        let r = try Subtitles.search(path: film, lang: lang)
+        o["results"] = r.map { ["id": $0.id, "name": $0.name, "downloads": $0.downloads, "exact": $0.exact, "release": $0.release] as [String: Any] }
+        if let id = argValue("--download").flatMap(Int.init) {
+            let s = try Subtitles.download(id); let dest = Subtitles.destination(film: film, lang: lang); try s.write(toFile: dest, atomically: true, encoding: .utf8); o["saved"] = dest; o["text"] = s
+        }
+    } catch { o["error"] = "\(error)" }
+    print(String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)!); exit(0)
+}
+
 if let p = argValue("--test-api"), let port = UInt16(p) {
     setvbuf(stderr, nil, _IOLBF, 0)
     let folder = CommandLine.arguments.dropFirst().first { !$0.hasPrefix("--") && Int($0) == nil && $0 != argValue("--mpv") } ?? "~/Desktop"

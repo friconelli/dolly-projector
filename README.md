@@ -16,3 +16,7 @@ Scheda **Altro → Telecomando dal telefono**: attivando l'interruttore l'app ap
 - La pagina è `RemoteHTML.swift` (un file, nessuna richiesta esterna).
 - Collaudo: `./test_dolly.py MEDIA -k remote` (avvia l'app con `--remote`).
 
+## Sottotitoli online
+Scheda **Sottotitoli → Scarica sottotitoli**: cerca su OpenSubtitles (API ufficiale v1) usando titolo e anno dal nome del file ("Titolo (Anno - Regista).ext") e l'hash del file, così i risultati "stesso file" sono sincronizzati. Serve un account gratuito: ognuno inserisce la propria chiave API (opensubtitles.com/consumers), utente e password (nel Portachiavi). Il file viene salvato accanto al film come `Film.it.srt` solo dopo conferma, non sovrascrive mai (se esiste crea `.it.2.srt`), è convertito in UTF-8 e, se il film è in onda, viene caricato subito. Si collega a internet solo con Cerca/Scarica.
+- Collaudo: `./test_dolly.py MEDIA -k sottotitoli_online` (server OpenSubtitles simulato; la prova con l'account vero va fatta a mano).
+
