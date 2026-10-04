@@ -4,7 +4,7 @@
 # Per rinominare l'app basta cambiare NAME e BUNDLE_ID qui sotto.
 # SDK 15.2: con il solo CommandLineTools gli SDK più recenti non trovano il plugin dei macro di SwiftUI (@State).
 set -e; cd "$(dirname "$0")"
-NAME="Dolly Projector"; EXE=Dolly; BUNDLE_ID=app.dollyprojector.Dolly; VERSION=${VERSION:-0.2.0}   # EXE: nome del programma dentro il pacchetto
+NAME="Dolly Projector"; EXE=Dolly; BUNDLE_ID=app.dollyprojector.Dolly; VERSION=${VERSION:-0.2.1}   # EXE: nome del programma dentro il pacchetto
 SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk
 A="dist/$NAME.app"; rm -rf "$A"; mkdir -p "$A/Contents/MacOS" "$A/Contents/Resources"
 # target 13.0 anche per x86_64: sotto, il CommandLineTools qui installato non ha le librerie di compatibilità x86_64

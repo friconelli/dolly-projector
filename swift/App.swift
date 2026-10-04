@@ -151,12 +151,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return nil
         }
     }
+    @objc func toggleRemote(_ s: NSMenuItem) {
+        let r = RemoteControl.shared; r.setEnabled(!r.enabled)
+        guard r.enabled else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            let a = NSAlert(); a.messageText = "Telecomando attivo"
+            if let u = r.urls.first {
+                a.informativeText = "Sul telefono (stessa rete del Mac, anche senza internet) inquadra il codice o apri:\n\(u)\n\nPIN: \(r.pin)"
+                if let q = RemoteControl.qr(u) { q.size = NSSize(width: 150, height: 150); a.icon = q }
+            } else { a.informativeText = r.problem ?? "Nessuna rete trovata: collega il Mac al Wi-Fi o a un router." }
+            a.runModal()
+        }
+    }
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleRemote(_:)) { item.state = RemoteControl.shared.enabled ? .on : .off }
+        return true
+    }
     func buildMenu() {
         let main = NSMenu(); NSApp.mainMenu = main
         func top(_ title: String) -> NSMenu { let m = NSMenu(title: title); let i = NSMenuItem(); i.submenu = m; main.addItem(i); return m }
         let app = top("Dolly Projector")
         app.addItem(withTitle: "Cambia cartella dei film…", action: #selector(changeFolder), keyEquivalent: "").target = self
         let sc = NSMenuItem(title: "Schermo della sala", action: nil, keyEquivalent: ""); let sm = NSMenu(); sm.delegate = self; sc.submenu = sm; app.addItem(sc)
+        app.addItem(withTitle: "Controlla aggiornamenti…", action: #selector(checkForUpdates(_:)), keyEquivalent: "").target = self
+        let rm = NSMenuItem(title: "Telecomando dal telefono", action: #selector(toggleRemote(_:)), keyEquivalent: ""); rm.target = self; app.addItem(rm)
         app.addItem(.separator())
         app.addItem(withTitle: "Nascondi Dolly Projector", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(withTitle: "Esci da Dolly Projector", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

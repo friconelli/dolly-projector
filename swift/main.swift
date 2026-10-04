@@ -6,6 +6,14 @@ var signalSources: [DispatchSourceSignal] = []
 func argValue(_ name: String) -> String? { CommandLine.arguments.firstIndex(of: name).flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil } }
 let mpvBinary = ProcessInfo.processInfo.environment["DOLLY_MPV"] ?? "/Applications/mpv.app/Contents/MacOS/mpv"
 
+// Collaudo dell'aggiornamento senza finestre: --selftest-update stampa l'esito di controllo, scarico e verifica (non sostituisce nulla).
+if CommandLine.arguments.contains("--selftest-update") {
+    do { let i = try Updater.fetch(); var o: [String: Any] = ["version": i.version, "newer": Updater.isNewer(i.version, than: Updater.current), "current": Updater.current]
+        if CommandLine.arguments.contains("--download") { o["app"] = try Updater.download(i) }
+        print(String(data: try JSONSerialization.data(withJSONObject: o), encoding: .utf8)!); exit(0)
+    } catch { print("{\"error\": \"\(error)\"}"); exit(2) }
+}
+
 if let p = argValue("--test-api"), let port = UInt16(p) {
     setvbuf(stderr, nil, _IOLBF, 0)
     let folder = CommandLine.arguments.dropFirst().first { !$0.hasPrefix("--") && Int($0) == nil && $0 != argValue("--mpv") } ?? "~/Desktop"

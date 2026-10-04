@@ -364,17 +364,19 @@ def t_autoresume():
     finally: s.stop()
 
 def t_prevloop():
-    """Tasto "precedente" (torna all'inizio), ripeti questo film (poi la scaletta prosegue) ed elemento Nero."""
+    """Tasti precedente/successivo (da un media all'altro), ripeti questo film (poi la scaletta prosegue) ed elemento Nero."""
     s = Srv(MEDIA, files=["01_a.mp4", "04_d.mp4"])
     try:
         s.act(a="play", i=0); s.wait(lambda x: x["mode"] == "playing" and x["time"] > .5, 8)
         s.act(a="prev"); st = s.wait(lambda x: x["time"] < 2, 4)
-        check(st is not None and st["idx"] == 0, "su un film con pochi secondi trascorsi, ⏮ lo riporta all'inizio (primo elemento)")
-        s.act(a="seek", v=5, m="absolute"); time.sleep(.6); s.act(a="prev"); time.sleep(.6); st = s.state()
-        check(st["idx"] == 0 and st["time"] < 3, f"dopo i primi secondi, ⏮ riporta all'inizio dello stesso film (t={st['time']:.1f})")
+        check(st is not None and st["idx"] == 0, "sul primo elemento non c'è un precedente: ⏮ riporta il film all'inizio")
+        s.act(a="seek", v=5, m="absolute"); time.sleep(.6); s.act(a="next"); st = s.wait(lambda x: x["mode"] == "playing" and x["idx"] == 1, 5)
+        check(st is not None, "⏭ va al media successivo anche a film avanzato")
+        s.act(a="seek", v=5, m="absolute"); time.sleep(.6); s.act(a="prev"); st = s.wait(lambda x: x["mode"] == "playing" and x["idx"] == 0, 5)
+        check(st is not None, "⏮ va al media precedente anche dopo i primi secondi (non si limita a ripartire)")
         s.act(a="play", i=1); s.wait(lambda x: x["mode"] == "playing" and x["idx"] == 1 and x["time"] > .3, 6); time.sleep(.5)
         s.act(a="prev"); st = s.wait(lambda x: x["mode"] == "playing" and x["idx"] == 0, 5)
-        check(st is not None, "sul secondo film appena partito, ⏮ va al precedente")
+        check(st is not None, "dal secondo film, ⏮ va al precedente")
         # ripeti questo film
         s.act(a="set", p="loop-file", v="inf"); s.wait(lambda x: x["time"] > .5, 4); tail_seek(s, 1.5); time.sleep(4.5); st = s.state()
         check(st["mode"] == "playing" and st["idx"] == 0, f"con la ripetizione il film ricomincia e non passa al successivo (idx {st['idx']}, t={st['time']:.1f})")
@@ -523,6 +525,39 @@ def t_remote():
         c, _ = call("/api/state", tok=tok); check(c == 200, "ma chi è già collegato continua a funzionare")
     finally: s.stop()
 
+def t_update():
+    """Aggiornamento dal menu: confronto versioni, scarico, SHA-256, identità dell'app e rifiuto di file alterati."""
+    import hashlib, http.server, functools
+    d = tempfile.mkdtemp(prefix="dolly-upd-")
+    def make(version, bid="app.dollyprojector.Dolly"):
+        app = os.path.join(d, version + bid[-3:], "Dolly Projector.app", "Contents"); os.makedirs(app)
+        open(os.path.join(app, "Info.plist"), "w").write(f'<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>{bid}</string><key>CFBundleShortVersionString</key><string>{version}</string></dict></plist>')
+        z = os.path.join(d, f"Dolly-{version}-{bid[-3:]}.zip"); subprocess.run(["ditto", "-c", "-k", "--keepParent", os.path.join(d, version + bid[-3:], "Dolly Projector.app"), z], check=True)
+        return z, hashlib.sha256(open(z, "rb").read()).hexdigest()
+    port = 8899
+    h = http.server.ThreadingHTTPServer(("127.0.0.1", port), functools.partial(http.server.SimpleHTTPRequestHandler, directory=d))
+    h.RequestHandlerClass.log_message = lambda *a: None
+    threading.Thread(target=h.serve_forever, daemon=True).start()
+    bin_ = os.environ["DOLLY_BIN"]
+    def run(info, current="0.2.1", dl=True):
+        json.dump(info, open(os.path.join(d, "version.json"), "w"))
+        r = subprocess.run([bin_, "--selftest-update"] + (["--download"] if dl else []), capture_output=True, text=True, timeout=60,
+                           env=dict(os.environ, DOLLY_UPDATE_URL=f"http://127.0.0.1:{port}/version.json", DOLLY_VERSION=current))
+        try: return json.loads(r.stdout.strip().splitlines()[-1])
+        except Exception: return {"error": r.stdout + r.stderr}
+    try:
+        z, sha = make("9.9.9"); url = f"http://127.0.0.1:{port}/{os.path.basename(z)}"
+        o = run({"version": "9.9.9", "url": url, "sha256": sha, "bytes": 1})
+        check(o.get("newer") is True and o.get("version") == "9.9.9", f"riconosce la versione più recente ({o})")
+        check(os.path.isdir(o.get("app", "") or "/nonexistent"), "scarica, verifica ed estrae la nuova app")
+        o = run({"version": "0.2.1", "url": url, "sha256": sha}, dl=False); check(o.get("newer") is False, "stessa versione: nessun aggiornamento")
+        o = run({"version": "0.10.0", "url": url, "sha256": sha}, current="0.9.5", dl=False); check(o.get("newer") is True, "0.10.0 è più recente di 0.9.5 (confronto numerico)")
+        o = run({"version": "9.9.9", "url": url, "sha256": "0" * 64}); check("SHA-256" in o.get("error", ""), "file con SHA-256 diverso: rifiutato")
+        o = run({"version": "9.9.8", "url": url, "sha256": sha}); check("non contiene" in o.get("error", ""), "versione dell'archivio diversa da quella annunciata: rifiutato")
+        z2, sha2 = make("9.9.9", bid="evil.app.xyz"); o = run({"version": "9.9.9", "url": f"http://127.0.0.1:{port}/{os.path.basename(z2)}", "sha256": sha2}); check("non contiene" in o.get("error", ""), "app con un altro identificativo: rifiutata")
+        o = run({"version": "9.9.9", "url": "http://example.com/x.zip", "sha256": sha}, dl=False); check("non valida" in o.get("error", ""), "un indirizzo http non locale è rifiutato")
+    finally: h.shutdown()
+
 def t_orphan():
     """Se lo script viene ucciso di forza, al riavvio il vecchio mpv rimasto sullo schermo viene chiuso."""
     s = Srv(MEDIA, files=["01_a.mp4"])
@@ -577,7 +612,7 @@ def t_soak(minutes):
         if len(samples) > 3: check(samples[-1][0] < samples[1][0] * 1.6 + 30 and samples[-1][1] < samples[1][1] * 1.6 + 100, f"memoria stabile python/mpv MB: {samples[1]} → {samples[-1]}")
     finally: s.stop()
 
-TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote,
+TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "update": t_update,
          "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film}
 
 def main():

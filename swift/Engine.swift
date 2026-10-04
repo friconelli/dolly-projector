@@ -305,8 +305,8 @@ final class Engine: ObservableObject {
             if mode == "gap" { load(next) } else if mode == "wait" { _ = try? mpv.ipc([["show-text", "", 1]]); advance(idx) }
         case "extend": if mode == "wait" { until += asDouble(d["v"]) ?? 60 }   // intervallo più lungo
         case "next": startItem(base() + 1)
-        case "prev":   // come in un lettore: dopo i primi secondi (o sul primo elemento) riporta all'inizio, altrimenti va al precedente
-            if mode == "playing" && (pos > 3 || base() == 0) { try mpv.ipc([["seek", 0, "absolute"]]) } else { startItem(base() - 1) }
+        case "prev":   // va sempre all'elemento precedente; solo sul primo (non c'è un precedente) riporta il film all'inizio
+            if base() == 0 { if mode == "playing" { try mpv.ipc([["seek", 0, "absolute"]]) } else { startItem(0) } } else { startItem(base() - 1) }
         case "stop": stopAll()
         case "resume":
             if let r = resume, let i = asInt(r["idx"]), i < items.count { load(i, start: asDouble(r["pos"]) ?? 0) }
