@@ -12,8 +12,15 @@ struct HostView: View {
 }
 
 func bundledMpv() -> String {
-    let b = Bundle.main.resourceURL?.appendingPathComponent("mpv.app/Contents/MacOS/mpv").path
-    if let b = b, FileManager.default.isExecutableFile(atPath: b) { return b }
+    // Apple Silicon usa l'mpv nativo arm64 (parte subito); i Mac Intel (e il ripiego) usano quello x86_64. Con un solo mpv Rosetta dovrebbe tradurlo ad ogni nuova installazione (~20 s).
+    #if arch(arm64)
+    let names = ["mpv-arm64.app", "mpv-x86_64.app"]
+    #else
+    let names = ["mpv-x86_64.app"]
+    #endif
+    for n in names {
+        if let b = Bundle.main.resourceURL?.appendingPathComponent(n + "/Contents/MacOS/mpv").path, FileManager.default.isExecutableFile(atPath: b) { return b }
+    }
     return mpvBinary
 }
 
