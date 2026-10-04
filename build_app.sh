@@ -30,5 +30,9 @@ cat > "$A/Contents/Info.plist" <<P
 <key>NSLocalNetworkUsageDescription</key><string>Il telecomando dal telefono usa la rete locale per comandare la proiezione.</string><key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>
 P
 codesign --force --deep -s - "$A" 2>/dev/null || true                 # firma ad-hoc; per la distribuzione pubblica servono firma Developer ID e notarizzazione
+# Requisito di identità stabile: di default una firma ad-hoc è legata al codice esatto della build (cdhash), quindi a ogni versione macOS vede "un'altra app" e perde i permessi (Registrazione schermo per l'anteprima).
+# Con il solo identificativo, il permesso concesso resta valido per le versioni successive.
+codesign --force -s - -r='designated => identifier "'$BUNDLE_ID'"' "$A" || { echo "firma con requisito stabile non riuscita"; exit 1; }
+codesign --verify --deep --strict "$A" || { echo "firma non valida"; exit 1; }
 ZIP="Dolly-Projector.zip"; rm -f "dist/Dolly.zip" "dist/$ZIP"; (cd dist && ditto -c -k --keepParent "$NAME.app" "$ZIP")
 du -sh "$A" "dist/$ZIP"

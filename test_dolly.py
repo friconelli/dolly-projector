@@ -488,8 +488,9 @@ def t_loop_film():
 def t_remote():
     """Telecomando dal telefono: PIN, accesso, comandi ammessi e rifiutati, stato ridotto, anteprima."""
     import urllib.error
+    os.environ["DOLLY_REMOTE_PORT"] = "8590"   # non la 8484: potrebbe esserci già un'app vera aperta
     s = Srv(MEDIA, files=["01_a.mp4", "04_d.mp4"], screen_args=("--screen", "0", "--windowed", "--remote"))
-    base = "http://127.0.0.1:8484"
+    base = "http://127.0.0.1:8590"
     def call(path, body=None, tok=None):
         rq = urllib.request.Request(base + path, json.dumps(body).encode() if body is not None else None, {"X-Token": tok} if tok else {})
         try:

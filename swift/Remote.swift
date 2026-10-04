@@ -49,7 +49,8 @@ final class RemoteControl: ObservableObject {
         let s = socket(AF_INET, SOCK_STREAM, 0); var one: Int32 = 1
         setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
         var bound = false
-        for p in UInt16(8484)...UInt16(8494) {
+        let first = UInt16(ProcessInfo.processInfo.environment["DOLLY_REMOTE_PORT"] ?? "") ?? 8484   // (la variabile serve solo ai collaudi)
+        for p in first...(first + 10) {
             var a = sockaddr_in(); a.sin_family = sa_family_t(AF_INET); a.sin_port = p.bigEndian; a.sin_addr.s_addr = INADDR_ANY
             if withUnsafePointer(to: &a, { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }) == 0 { port = p; bound = true; break }
         }
