@@ -231,11 +231,31 @@ final class SnapshotRunner {
         window.contentView = host; window.orderBack(nil)
         if ProcessInfo.processInfo.environment["DOLLY_DARK"] == "1" { window.appearance = NSAppearance(named: .darkAqua) }   // per gli screenshot del sito
         if let p = play { _ = engine.actSync(["a": "play", "i": p]) }
+        // Collaudo del trascinamento: DOLLY_DRAG="x,yDa,yA" (punti dall'alto a sinistra della finestra) preme sulla maniglia, trascina a passi e rilascia, con veri NSEvent nella finestra.
+        if let spec = ProcessInfo.processInfo.environment["DOLLY_DRAG"] {
+            let v = spec.split(separator: ",").compactMap { Double($0) }
+            if v.count == 3 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait * 0.4) {
+                    host.layoutSubtreeIfNeeded()
+                    self.window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)   // SwiftUI vuole la finestra attiva per i gesti
+                    let h = host.bounds.height; var n = 0
+                    func post(_ type: NSEvent.EventType, _ y: Double) {
+                        n += 1
+                        if let ev = NSEvent.mouseEvent(with: type, location: NSPoint(x: v[0], y: h - y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: self.window.windowNumber, context: nil, eventNumber: n, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) { self.window.sendEvent(ev) }
+                    }
+                    post(.leftMouseDown, v[1])
+                    let steps = 12
+                    for k in 1...steps { DispatchQueue.main.asyncAfter(deadline: .now() + 0.03 * Double(k)) { post(.leftMouseDragged, v[1] + (v[2] - v[1]) * Double(k) / Double(steps)) } }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.03 * Double(steps + 2)) { post(.leftMouseUp, v[2]) }
+                }
+            }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
             host.layoutSubtreeIfNeeded()
             let r = host.bounds; guard let rep = host.bitmapImageRepForCachingDisplay(in: r) else { exit(2) }
             host.cacheDisplay(in: r, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: self.out))
+            if ProcessInfo.processInfo.environment["DOLLY_DRAG"] != nil, let o = (try? JSONSerialization.jsonObject(with: self.engine.stateSync())) as? [String: Any] { print("ORDER:", (o["items"] as? [[String: Any]] ?? []).map { $0["name"] as? String ?? "" }.joined(separator: "|")) }
             self.engine.shutdown(); exit(0)
         }
     }

@@ -200,24 +200,50 @@ func fileURLs(from providers: [NSItemProvider], done: @escaping ([String]) -> Vo
     g.notify(queue: .main) { done(paths.sorted()) }   // in ordine di nome, come nelle cartelle
 }
 
-let rowDragPrefix = "dolly-row:"
+/// Maniglia di trascinamento come vista AppKit: riceve direttamente pressione, trascinamento e rilascio del mouse (nessun gesto SwiftUI che altri gesti della riga potrebbero intercettare).
+final class GripNSView: NSView {
+    var onMove: (CGFloat) -> Void = { _ in }, onEnd: (CGFloat) -> Void = { _ in }
+    private var startY: CGFloat = 0
+    override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func mouseDown(with e: NSEvent) { startY = e.locationInWindow.y }
+    override func mouseDragged(with e: NSEvent) { onMove(startY - e.locationInWindow.y) }   // verso il basso = positivo
+    override func mouseUp(with e: NSEvent) { onEnd(startY - e.locationInWindow.y) }
+}
+struct GripHandle: NSViewRepresentable {
+    var onMove: (CGFloat) -> Void; var onEnd: (CGFloat) -> Void
+    func makeNSView(context: Context) -> GripNSView { let v = GripNSView(); v.onMove = onMove; v.onEnd = onEnd; return v }
+    func updateNSView(_ v: GripNSView, context: Context) { v.onMove = onMove; v.onEnd = onEnd }
+}
 
-/// Rilascio su una riga della scaletta: una riga trascinata dalla scaletta stessa la sposta lì; file o cartelle dal Finder vengono inseriti prima di quella riga.
-struct RowDrop: DropDelegate {
-    let engine: Engine; let index: Int; @Binding var target: Int?
-    func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: [.fileURL, .plainText]) }
-    func dropEntered(info: DropInfo) { target = index }
-    func dropExited(info: DropInfo) { if target == index { target = nil } }
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: info.hasItemsConforming(to: [.fileURL]) ? .copy : .move) }
+/// Riordino con il trascinamento: le righe segnalano il loro rettangolo (nello spazio "scaletta") e il gesto della maniglia trova la riga sotto il puntatore.
+struct RowFramesKey: PreferenceKey {
+    static var defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) { value.merge(nextValue()) { $1 } }
+}
+/// Riga più vicina alla coordinata y (è dove finisce l'elemento trascinato).
+func rowIndex(at y: CGFloat, frames: [Int: CGRect], count: Int) -> Int {
+    var best = 0, bestD = CGFloat.infinity
+    for (i, f) in frames where i < count { let d = abs(f.midY - y); if d < bestD { bestD = d; best = i } }
+    return best
+}
+/// Posizione di inserimento (0...count) per file lasciati a quota y: prima della prima riga il cui centro sta sotto y.
+func insertionIndex(at y: CGFloat, frames: [Int: CGRect], count: Int) -> Int {
+    for i in 0..<count { if let f = frames[i], y < f.midY { return i } }
+    return count
+}
+
+/// File o cartelle trascinati dal Finder sulla scaletta: vengono inseriti nel punto in cui si rilasciano.
+struct FinderDrop: DropDelegate {
+    let engine: Engine; let insertion: (CGFloat) -> Int; @Binding var at: Int?
+    func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: [.fileURL]) }
+    func dropUpdated(info: DropInfo) -> DropProposal? { at = insertion(info.location.y); return DropProposal(operation: .copy) }
+    func dropExited(info: DropInfo) { at = nil }
     func performDrop(info: DropInfo) -> Bool {
-        target = nil
-        let files = info.itemProviders(for: [.fileURL])
-        if !files.isEmpty { fileURLs(from: files) { engine.send(["a": "add", "paths": $0, "at": index]) }; return true }
-        guard let p = info.itemProviders(for: [.plainText]).first else { return false }
-        _ = p.loadObject(ofClass: NSString.self) { s, _ in
-            guard let s = s as? String, s.hasPrefix(rowDragPrefix), let from = Int(s.dropFirst(rowDragPrefix.count)) else { return }
-            DispatchQueue.main.async { engine.send(["a": "reorder", "from": from, "to": min(index, max(0, engine.snap.items.count - 1))]) }
-        }
+        let idx = insertion(info.location.y); at = nil
+        fileURLs(from: info.itemProviders(for: [.fileURL])) { engine.send(["a": "add", "paths": $0, "at": idx]) }
         return true
     }
 }
@@ -225,12 +251,19 @@ struct RowDrop: DropDelegate {
 struct ScalettaPanel: View {
     @ObservedObject var engine: Engine
     @State private var dropTarget = false
-    @State private var dropRow: Int?
+    @State private var dragFrom: Int?; @State private var dragTo: Int?; @State private var dragDY: CGFloat = 0   // riordino in corso
+    @State private var rowFrames: [Int: CGRect] = [:]; @State private var fileAt: Int?; @State private var dragHome: CGFloat = 0   // centro della riga trascinata PRIMA di spostarla (la sua posizione misurata cambia mentre la si sposta)                              // rettangoli delle righe; punto di inserimento dei file dal Finder
     var s: Snap { engine.snap }
     @State private var nameText = ""; @FocusState private var nameFocus: Bool
     @State private var gear: Int?
     @State private var showPause = false; @State private var showBlack = false
     @State private var pmin = "10"; @State private var ptxt = tr("Intervallo"); @State private var bsec = "5"
+    /// Riga su cui cadrebbe l'elemento i trascinato di dy punti. La riga trascinata si confronta con la sua posizione di partenza: quella misurata include già lo spostamento.
+    func dropRow(_ i: Int, _ dy: CGFloat) -> Int {
+        var f = rowFrames
+        if let r = f[i] { f[i] = CGRect(x: r.minX, y: dragHome - r.height / 2, width: r.width, height: r.height) }
+        return rowIndex(at: dragHome + dy, frames: f, count: s.items.count)
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
@@ -252,17 +285,35 @@ struct ScalettaPanel: View {
                     .background(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.accentColor.opacity(dropTarget ? 0.8 : 0), style: StrokeStyle(lineWidth: 2, dash: [6])).padding(8))
                     .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in fileURLs(from: providers) { engine.send(["a": "add", "paths": $0]) }; return true }
             } else {
-                List {
-                    ForEach(Array(s.items.enumerated()), id: \.offset) { i, it in
-                        ItemRow(engine: engine, i: i, it: it, gear: $gear).listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)).listRowSeparator(.hidden)
-                            .overlay(alignment: .top) { if dropRow == i { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6).offset(y: -2) } }   // dove cadrà
-                            .onDrag { NSItemProvider(object: "\(rowDragPrefix)\(i)" as NSString) }   // trascina la riga per cambiare l'ordine
-                            .onDrop(of: [.fileURL, .plainText], delegate: RowDrop(engine: engine, index: i, target: $dropRow))
+                GeometryReader { geo in
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            ForEach(Array(s.items.enumerated()), id: \.offset) { i, it in
+                                ItemRow(engine: engine, i: i, it: it, gear: $gear,
+                                        onGrip: { dy in
+                                            if dragFrom != i { dragHome = rowFrames[i]?.midY ?? 0 }
+                                            dragFrom = i; dragDY = dy; dragTo = dropRow(i, dy) },
+                                        onGripEnd: { dy in
+                                            if dragFrom != i { dragHome = rowFrames[i]?.midY ?? 0 }
+                                            let to = dropRow(i, dy)
+                                            if to != i { engine.send(["a": "reorder", "from": i, "to": to]) }
+                                            dragFrom = nil; dragTo = nil; dragDY = 0 })
+                                    .background(GeometryReader { g in Color.clear.preference(key: RowFramesKey.self, value: [i: g.frame(in: .named("scaletta"))]) })
+                                    .opacity(dragFrom == i ? 0.55 : 1).offset(y: dragFrom == i ? dragDY : 0).zIndex(dragFrom == i ? 1 : 0)
+                                    .overlay(alignment: dragFrom != nil && (dragTo ?? 0) > (dragFrom ?? 0) ? .bottom : .top) {   // dove cadrà
+                                        if let f = dragFrom, dragTo == i, f != i { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6) }
+                                        else if fileAt == i { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6) } }
+                            }
+                            Color.clear.frame(height: 36).overlay(alignment: .top) { if fileAt == s.items.count { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6) } }
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 6)
+                        .frame(minHeight: geo.size.height, alignment: .top)
+                        .coordinateSpace(name: "scaletta")
+                        .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
+                        .contentShape(Rectangle())
+                        .onDrop(of: [.fileURL], delegate: FinderDrop(engine: engine, insertion: { insertionIndex(at: $0, frames: rowFrames, count: s.items.count) }, at: $fileAt))
                     }
-                    Color.clear.frame(height: 44).listRowSeparator(.hidden)   // zona in fondo: rilascia qui per mettere in coda
-                        .overlay(alignment: .top) { if dropRow == s.items.count { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6) } }
-                        .onDrop(of: [.fileURL, .plainText], delegate: RowDrop(engine: engine, index: s.items.count, target: $dropRow))
-                }.listStyle(.plain).scrollContentBackground(.hidden)
+                }
             }
             Divider()
             HStack(spacing: 8) {
@@ -299,11 +350,16 @@ struct ScalettaPanel: View {
 struct ItemRow: View {
     @ObservedObject var engine: Engine
     let i: Int; let it: ItemState; @Binding var gear: Int?
+    var onGrip: (CGFloat) -> Void = { _ in }; var onGripEnd: (CGFloat) -> Void = { _ in }   // riordino: spostamento verso il basso in punti
     var s: Snap { engine.snap }
     @State private var hover = false
     var body: some View {
         let cur = (s.mode == "playing" || s.mode == "wait") && s.idx == i, nxt = (s.mode == "gap" && s.next == i) || (s.mode == "idle" && s.sel == i)
         HStack(spacing: 10) {
+            ZStack {
+                GripHandle(onMove: onGrip, onEnd: onGripEnd)
+                Image(systemName: "line.3.horizontal").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary.opacity(hover ? 0.9 : 0.35)).allowsHitTesting(false)
+            }.frame(width: 14, height: 30).help(tr("Trascina per cambiare l'ordine"))
             Button { play() } label: {
                 ZStack { RoundedRectangle(cornerRadius: 7, style: .continuous).fill(cur ? cueRed : Color.primary.opacity(0.10)).frame(width: 30, height: 30)
                     Image(systemName: cur ? "waveform" : (hover ? "play.fill" : icon)).font(.system(size: 12, weight: .semibold)).foregroundStyle(cur ? .white : .secondary) }

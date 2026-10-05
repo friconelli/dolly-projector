@@ -600,6 +600,30 @@ def t_inglese():
             check(f'<html lang="{remote}">' in html, f"[{lang}] la pagina del telecomando è in {remote}")
         finally: s.stop()
 
+def t_trascinamento_logica():
+    """Logica del riordino con il trascinamento: da dove si rilascia a quale riga/posizione corrisponde (righe da 48 pt a passo 50)."""
+    r = subprocess.run([os.environ["DOLLY_BIN"], "--selftest-drag"], capture_output=True, text=True, timeout=30)
+    o = json.loads(r.stdout.strip().splitlines()[-1]); ys = [-30, 10, 26, 74, 120, 175, 240, 400]
+    check(o["row"] == [0, 0, 0, 1, 2, 3, 4, 4], f"riga più vicina al puntatore ({o['row']})")
+    check(o["ins"] == [0, 0, 1, 2, 2, 4, 5, 5], f"posizione di inserimento dei file ({o['ins']})")
+    check(o["rowEmpty"] == 0 and o["insEmpty"] == 0, "scaletta vuota: indice 0")
+
+def t_trascinamento_gui():
+    """Riordino della scaletta con il trascinamento della maniglia (eventi mouse veri nella finestra, senza passare dal motore)."""
+    M = MEDIA
+    def drag(spec):
+        home = tempfile.mkdtemp(prefix="dolly-dnd-")
+        r = subprocess.run([os.environ["DOLLY_BIN"], "--snapshot", os.path.join(home, "s.png"), "--folder", M, "--wait", "5", "--size", "1240x720"],
+                           capture_output=True, text=True, timeout=90, env=dict(os.environ, DOLLY_HOME=home, DOLLY_LANG="it", DOLLY_DRAG=spec))
+        for l in r.stdout.splitlines():
+            if l.startswith("ORDER:"): return [x.rsplit(".", 1)[0] for x in l[6:].strip().split("|")]
+        return None
+    base = ["01_a", "02_b", "03_hevc10", "04_d", "05_e", "06_troncato", "07_forzati"]
+    o = drag("20.5,109,229"); check(o == ["02_b", "03_hevc10", "04_d", "01_a", "05_e", "06_troncato", "07_forzati"], f"trascinando la prima riga di 3 posti in giù ({o})")
+    o = drag("20.5,229,109"); check(o == ["04_d", "01_a", "02_b", "03_hevc10", "05_e", "06_troncato", "07_forzati"], f"trascinando la quarta riga in cima ({o})")
+    o = drag("20.5,109,500"); check(o == base[1:] + ["01_a"], f"trascinando oltre l'ultima riga va in coda ({o})")
+    o = drag("20.5,109,112"); check(o == base, f"un trascinamento minimo non cambia nulla ({o})")
+
 def t_orphan():
     """Se lo script viene ucciso di forza, al riavvio il vecchio mpv rimasto sullo schermo viene chiuso."""
     s = Srv(MEDIA, files=["01_a.mp4"])
@@ -654,13 +678,14 @@ def t_soak(minutes):
         if len(samples) > 3: check(samples[-1][0] < samples[1][0] * 1.6 + 30 and samples[-1][1] < samples[1][1] * 1.6 + 100, f"memoria stabile python/mpv MB: {samples[1]} → {samples[-1]}")
     finally: s.stop()
 
-TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "inglese": t_inglese, "trascina_file": t_trascina_file, "update": t_update,
+TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "trascinamento_gui": t_trascinamento_gui, "trascinamento_logica": t_trascinamento_logica, "inglese": t_inglese, "trascina_file": t_trascina_file, "update": t_update,
          "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film}
 
 def main():
     global MEDIA
     ap = argparse.ArgumentParser(); ap.add_argument("media"); ap.add_argument("-k", default=""); ap.add_argument("--real", nargs="*", default=[])
     ap.add_argument("--soak", type=float, default=0); a = ap.parse_args(); MEDIA = os.path.abspath(a.media)
+    os.environ["DOLLY_LANG"] = "it"   # i collaudi controllano i testi in italiano: senza questo l'app leggerebbe la lingua scelta nelle preferenze reali dell'utente
     names = [k for k in a.k.split(",") if k] or list(TESTS)
     for n in names:
         if n == "soak": continue

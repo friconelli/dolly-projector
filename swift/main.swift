@@ -14,6 +14,15 @@ if CommandLine.arguments.contains("--selftest-update") {
     } catch { print("{\"error\": \"\(error)\"}"); exit(2) }
 }
 
+// Collaudo della logica del trascinamento nella scaletta (senza finestre): --selftest-drag
+if CommandLine.arguments.contains("--selftest-drag") {
+    var fr: [Int: CGRect] = [:]; for i in 0..<5 { fr[i] = CGRect(x: 0, y: CGFloat(i) * 50, width: 300, height: 48) }   // 5 righe da 48 pt con 2 pt di spazio
+    let ys: [CGFloat] = [-30, 10, 26, 74, 120, 175, 240, 400]
+    let o: [String: Any] = ["row": ys.map { rowIndex(at: $0, frames: fr, count: 5) }, "ins": ys.map { insertionIndex(at: $0, frames: fr, count: 5) },
+                            "rowEmpty": rowIndex(at: 50, frames: [:], count: 0), "insEmpty": insertionIndex(at: 50, frames: [:], count: 0)]
+    print(String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)!); exit(0)
+}
+
 if let p = argValue("--test-api"), let port = UInt16(p) {
     setvbuf(stderr, nil, _IOLBF, 0)
     let folder = CommandLine.arguments.dropFirst().first { !$0.hasPrefix("--") && Int($0) == nil && $0 != argValue("--mpv") } ?? "~/Desktop"
