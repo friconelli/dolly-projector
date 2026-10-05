@@ -176,6 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if item.action == #selector(toggleRemote(_:)) { item.state = RemoteControl.shared.enabled ? .on : .off }
         return true
     }
+    /// Apre la pagina delle donazioni nel browser (solo quando si sceglie la voce: l'app non contatta nulla da sola).
+    @objc func donate() { NSWorkspace.shared.open(URL(string: "https://buymeacoffee.com/friconellit")!) }
     @objc func setLang(_ s: NSMenuItem) {
         Lang.setting = ["auto", "it", "en"][s.tag]
         buildMenu(); model.langRev += 1
@@ -188,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let sc = NSMenuItem(title: tr("Schermo della sala"), action: nil, keyEquivalent: ""); let sm = NSMenu(); sm.delegate = self; sc.submenu = sm; app.addItem(sc)
         app.addItem(withTitle: tr("Controlla aggiornamenti…"), action: #selector(checkForUpdates(_:)), keyEquivalent: "").target = self
         let rm = NSMenuItem(title: tr("Telecomando dal telefono"), action: #selector(toggleRemote(_:)), keyEquivalent: ""); rm.target = self; app.addItem(rm)
+        let dn = NSMenuItem(title: tr("Dona"), action: #selector(donate), keyEquivalent: ""); dn.target = self; app.addItem(dn)
         let lm = NSMenuItem(title: tr("Lingua"), action: nil, keyEquivalent: ""); let lsub = NSMenu()
         for (n, (title, code)) in [(tr("Automatica"), "auto"), ("Italiano", "it"), ("English", "en")].enumerated() {
             let it = NSMenuItem(title: title, action: #selector(setLang(_:)), keyEquivalent: ""); it.tag = n; it.target = self; it.state = Lang.setting == code ? .on : .off; lsub.addItem(it)

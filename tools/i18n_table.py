@@ -33,6 +33,7 @@ T = {
 "Riduci a icona": "Minimize",
 " (con la barra dei menu)": " (with the menu bar)",
 "Lingua": "Language",
+"Dona": "Donate",
 "Automatica": "Automatic",
 "Italiano": "Italian",
 # --- Engine (messaggi che arrivano all'interfaccia)

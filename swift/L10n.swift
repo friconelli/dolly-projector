@@ -50,6 +50,7 @@ let enStrings: [String: String] = [
     "Riduci a icona": "Minimize",
     " (con la barra dei menu)": " (with the menu bar)",
     "Lingua": "Language",
+    "Dona": "Donate",
     "Automatica": "Automatic",
     "Italiano": "Italian",
     "Scena": "Scene",
