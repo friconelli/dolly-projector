@@ -20,13 +20,13 @@ def check(cond, msg):
     return cond
 
 class Srv:
-    def __init__(s, media, home=None, files=None, extra="--vo=null --ao=null", screen_args=("--screen", "0", "--windowed")):
+    def __init__(s, media, home=None, files=None, extra="--vo=null --ao=null", screen_args=("--screen", "0", "--windowed"), lang="it"):
         s.port = PORT[0]; PORT[0] += 1
         s.home = home or tempfile.mkdtemp(prefix="dolly-test-")
-        s.folder = media; s.extra = extra; s.args = screen_args; s.p = None; s.start()
+        s.folder = media; s.extra = extra; s.args = screen_args; s.p = None; s.lang = lang; s.start()
         if files is not None: s.set_items(files)
     def start(s):
-        env = dict(os.environ, DOLLY_HOME=s.home, BROWSER="true")
+        env = dict(os.environ, DOLLY_HOME=s.home, BROWSER="true", DOLLY_LANG=s.lang)   # i collaudi controllano i testi in italiano salvo diversa richiesta
         bin_ = os.environ.get("DOLLY_BIN")   # se impostato, collauda l'app Swift (--test-api) invece del motore Python
         cmd = [bin_, s.folder, "--test-api", str(s.port), "--mpv", s.extra, *s.args] if bin_ else [sys.executable, os.path.join(HERE, "legacy", "dolly.py"), s.folder, "--port", str(s.port), "--mpv", s.extra, *s.args]
         s.p = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=open(os.path.join(s.home, "server.log"), "a"))
@@ -583,6 +583,23 @@ def t_trascina_file():
         check(s.state()["restarts"] == 0, "nessun riavvio")
     finally: s.stop()
 
+def t_inglese():
+    """Interfaccia in inglese: stessi dati, testi tradotti (nomi, etichette, errori, pagina del telecomando); l'italiano resta com'era."""
+    os.environ["DOLLY_REMOTE_PORT"] = "8592"
+    for lang, nero, interv, err, remote in (("en", "Black (2 s)", "Intermission", "index out of range", "en"), ("it", "Nero (2 s)", "Intervallo", "indice fuori range", "it")):
+        s = Srv(MEDIA, files=["01_a.mp4", "04_d.mp4"], screen_args=("--screen", "0", "--windowed", "--remote"), lang=lang)
+        try:
+            s.act(a="addblack", secs=2); s.act(a="addpause", secs=60)
+            its = s.state()["items"]
+            check(its[2]["name"] == nero, f"[{lang}] nome dell'elemento nero: {its[2]['name']}")
+            check(its[3]["text"] == interv, f"[{lang}] testo predefinito dell'intervallo: {its[3]['text']}")
+            check(s.act(a="setitem", i=99).get("error") == err, f"[{lang}] errore comprensibile: {s.act(a='setitem', i=99).get('error')}")
+            s.act(a="setitem", i=0, pre=1.5); s.act(a="play", i=0); st = s.wait(lambda x: x["mode"] == "gap", 4)
+            check(st is not None and st["label"] == ("Black before the film" if lang == "en" else "Nero prima del film"), f"[{lang}] etichetta del nero prima del film: {st and st['label']}")
+            time.sleep(.5); html = urllib.request.urlopen("http://127.0.0.1:8592/", timeout=5).read().decode()
+            check(f'<html lang="{remote}">' in html, f"[{lang}] la pagina del telecomando è in {remote}")
+        finally: s.stop()
+
 def t_orphan():
     """Se lo script viene ucciso di forza, al riavvio il vecchio mpv rimasto sullo schermo viene chiuso."""
     s = Srv(MEDIA, files=["01_a.mp4"])
@@ -637,7 +654,7 @@ def t_soak(minutes):
         if len(samples) > 3: check(samples[-1][0] < samples[1][0] * 1.6 + 30 and samples[-1][1] < samples[1][1] * 1.6 + 100, f"memoria stabile python/mpv MB: {samples[1]} → {samples[-1]}")
     finally: s.stop()
 
-TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "trascina_file": t_trascina_file, "update": t_update,
+TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "inglese": t_inglese, "trascina_file": t_trascina_file, "update": t_update,
          "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film}
 
 def main():

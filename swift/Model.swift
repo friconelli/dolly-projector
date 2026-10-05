@@ -38,7 +38,7 @@ struct Item: Equatable {
         ["kind": kind, "path": path, "pre": pre as Any? ?? NSNull(), "post": post as Any? ?? NSNull(), "vol": vol as Any? ?? NSNull(),
          "alang": alang, "slang": slang, "secs": secs, "text": text, "loop": loop, "submode": submode as Any? ?? NSNull()]
     }
-    var title: String { kind == "pausa" ? (text.isEmpty ? "Pausa" : text) : kind == "nero" ? "Nero (\(secs == secs.rounded() ? String(Int(secs)) : String(secs)) s)" : (path as NSString).lastPathComponent }
+    var title: String { kind == "pausa" ? (text.isEmpty ? tr("Pausa") : text) : kind == "nero" ? trf("Nero (%@ s)", secs == secs.rounded() ? String(Int(secs)) : String(secs)) : (path as NSString).lastPathComponent }
 }
 
 func videosIn(_ path: String) -> [String] {
@@ -63,7 +63,7 @@ struct Resume: Decodable, Equatable { var idx: Int; var pos: Double }
 struct Info: Decodable, Equatable { var res: String?; var fps: Double?; var vcodec: String?; var acodec: String?; var dropped: Int? }
 struct Snap: Decodable {
     var ok = true
-    var name = "Scena"; var mode = "idle"; var idx = -1; var sel = 0; var next = -1; var label = ""; var left = 0.0
+    var name = tr("Scena"); var mode = "idle"; var idx = -1; var sel = 0; var next = -1; var label = ""; var left = 0.0
     var err: String?; var restarts = 0; var auto = true; var loop = false; var defpre = 0.0; var defpost = 0.0
     var resume: Resume?; var defsub = "file"; var pid = 0; var folder = ""; var items: [ItemState] = []; var lib: [String] = []; var saved: [String] = []
     var playing = false; var pause = false; var time = 0.0; var dur = 0.0

@@ -55,7 +55,7 @@ final class RemoteControl: ObservableObject {
             var a = sockaddr_in(); a.sin_family = sa_family_t(AF_INET); a.sin_port = p.bigEndian; a.sin_addr.s_addr = INADDR_ANY
             if withUnsafePointer(to: &a, { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }) == 0 { port = p; bound = true; break }
         }
-        guard bound, listen(s, 16) == 0 else { close(s); DispatchQueue.main.async { self.problem = "Non riesco ad aprire una porta di rete."; self.urls = [] }; return }
+        guard bound, listen(s, 16) == 0 else { close(s); DispatchQueue.main.async { self.problem = tr("Non riesco ad aprire una porta di rete."); self.urls = [] }; return }
         listenFd = s
         let ips = RemoteControl.lanAddresses(), pt = port
         DispatchQueue.main.async { self.problem = nil; self.urls = ips.map { "http://\($0):\(pt)/" } }
@@ -125,21 +125,21 @@ final class RemoteControl: ObservableObject {
         while body.count < len { let n = recv(fd, &chunk, chunk.count, 0); if n <= 0 { break }; body.append(chunk, count: n) }
         let obj = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
 
-        if method == "GET" && (path == "/" || path == "/index.html") { reply(fd, 200, "text/html; charset=utf-8", Data(remoteHTML.utf8)); return }
+        if method == "GET" && (path == "/" || path == "/index.html") { reply(fd, 200, "text/html; charset=utf-8", Data(remoteHTML.replacingOccurrences(of: "__LANG__", with: Lang.code).utf8)); return }
         if method == "POST" && path == "/api/login" {
             let now = nowT(); lock.lock(); fails = fails.filter { now - $0 < 60 }; let blocked = fails.count >= 5; lock.unlock()
-            if blocked { json(fd, 429, ["error": "troppi tentativi"]); return }
+            if blocked { json(fd, 429, ["error": tr("troppi tentativi")]); return }
             if (obj["pin"] as? String ?? "") == pin {
                 let t = UUID().uuidString.replacingOccurrences(of: "-", with: "")
                 lock.lock(); tokens = Array((tokens + [t]).suffix(10)); lock.unlock(); save(); json(fd, 200, ["token": t])
-            } else { lock.lock(); fails.append(now); lock.unlock(); json(fd, 401, ["error": "PIN errato"]) }
+            } else { lock.lock(); fails.append(now); lock.unlock(); json(fd, 401, ["error": tr("PIN errato")]) }
             return
         }
         var tok = hdrToken
         if tok.isEmpty, let q = full.components(separatedBy: "?").dropFirst().first, let r = q.range(of: "t=") { tok = String(q[r.upperBound...].prefix(32)) }
         lock.lock(); let ok = !tok.isEmpty && tokens.contains(tok); lock.unlock()
-        guard ok else { json(fd, 401, ["error": "accesso necessario"]); return }
-        guard let e = engine else { json(fd, 503, ["error": "player non pronto"]); return }
+        guard ok else { json(fd, 401, ["error": tr("accesso necessario")]); return }
+        guard let e = engine else { json(fd, 503, ["error": tr("player non pronto")]); return }
 
         if method == "GET" && path == "/api/state" {
             let raw = (try? JSONSerialization.jsonObject(with: e.stateSync())) as? [String: Any] ?? [:]
@@ -150,7 +150,7 @@ final class RemoteControl: ObservableObject {
         } else if method == "GET" && path == "/api/preview" {
             if let j = e.previewSync() { reply(fd, 200, "image/jpeg", j) } else { reply(fd, 204, "text/plain", Data()) }
         } else if method == "POST" && path == "/api/cmd" {
-            guard allowed(obj) else { json(fd, 400, ["error": "comando non ammesso"]); return }
+            guard allowed(obj) else { json(fd, 400, ["error": tr("comando non ammesso")]); return }
             if let err = e.actSync(obj) { json(fd, 200, ["error": err]) } else { json(fd, 200, [String: Any]()) }
         } else { reply(fd, 404, "text/plain", Data()) }
     }
@@ -167,23 +167,23 @@ final class RemoteControl: ObservableObject {
 struct RemoteCard: View {
     @ObservedObject var r = RemoteControl.shared
     var body: some View {
-        Card(title: "Telecomando dal telefono", symbol: "iphone.radiowaves.left.and.right") {
-            Toggle("Attiva il telecomando", isOn: Binding(get: { r.enabled }, set: { r.setEnabled($0) })).toggleStyle(.switch)
+        Card(title: tr("Telecomando dal telefono"), symbol: "iphone.radiowaves.left.and.right") {
+            Toggle(tr("Attiva il telecomando"), isOn: Binding(get: { r.enabled }, set: { r.setEnabled($0) })).toggleStyle(.switch)
             if let p = r.problem { Text(p).font(.system(size: 12)).foregroundStyle(.red) }
             if r.enabled, let u = r.urls.first {
                 HStack(alignment: .top, spacing: 12) {
                     if let q = RemoteControl.qr(u) { Image(nsImage: q).interpolation(.none).resizable().frame(width: 112, height: 112).background(Color.white).cornerRadius(6) }
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Indirizzo").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(tr("Indirizzo")).font(.system(size: 11)).foregroundStyle(.secondary)
                         Text(u).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
-                        Text("PIN").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(tr("PIN")).font(.system(size: 11)).foregroundStyle(.secondary)
                         HStack { Text(r.pin).font(.system(size: 20, weight: .semibold, design: .monospaced)).textSelection(.enabled)
-                            Button("Nuovo PIN") { r.regeneratePin() }.controlSize(.small) }
+                            Button(tr("Nuovo PIN")) { r.regeneratePin() }.controlSize(.small) }
                     }
                 }
-                if r.urls.count > 1 { Text("Altri indirizzi: " + r.urls.dropFirst().joined(separator: "  ")).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled) }
-            } else if r.enabled { Text("Nessuna rete trovata: collega il Mac al Wi-Fi o a un router.").font(.system(size: 12)).foregroundStyle(.secondary) }
-            Text("Il telefono e il Mac devono stare sulla stessa rete; non serve internet. Inquadra il QR o scrivi l'indirizzo nel browser del telefono.")
+                if r.urls.count > 1 { Text(tr("Altri indirizzi: ") + r.urls.dropFirst().joined(separator: "  ")).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled) }
+            } else if r.enabled { Text(tr("Nessuna rete trovata: collega il Mac al Wi-Fi o a un router.")).font(.system(size: 12)).foregroundStyle(.secondary) }
+            Text(tr("Il telefono e il Mac devono stare sulla stessa rete; non serve internet. Inquadra il QR o scrivi l'indirizzo nel browser del telefono."))
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }

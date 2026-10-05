@@ -15,3 +15,7 @@ Scheda **Altro → Telecomando dal telefono**: attivando l'interruttore l'app ap
 - Cinque PIN sbagliati in un minuto bloccano i nuovi accessi; "Nuovo PIN" scollega i telefoni già abilitati.
 - La pagina è `RemoteHTML.swift` (un file, nessuna richiesta esterna).
 - Collaudo: `./test_dolly.py MEDIA -k remote` (avvia l'app con `--remote`).
+
+## Lingua (italiano / inglese)
+L'interfaccia segue la lingua del sistema (italiano se è italiano, altrimenti inglese); dal menu **Dolly Projector → Lingua** si può scegliere Automatica / Italiano / English. Tutti i testi stanno in `swift/L10n.swift` (chiave = italiano, valore = inglese) e passano da `tr()` / `trf()` (formato con %@ e %d). Per un nuovo testo: scriverlo in italiano nel codice dentro `tr("…")` e aggiungere la riga inglese in `L10n.swift` (se manca resta l'italiano). Anche la pagina del telecomando si traduce. `DOLLY_LANG=it|en` forza la lingua (i collaudi usano `it`); screenshot per il sito: `DOLLY_LANG=en DOLLY_DARK=1 DOLLY_CLEAN=1 Dolly --snapshot out.png --folder CARTELLA --play N --wait 6 --size 1240x720`.
+

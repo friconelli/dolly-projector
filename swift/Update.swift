@@ -21,12 +21,12 @@ enum Updater {
         let (data, resp) = try sync(rq)
         guard (resp as? HTTPURLResponse)?.statusCode == 200, let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let v = o["version"] as? String, let u = (o["url"] as? String).flatMap(URL.init(string:)), let h = o["sha256"] as? String, u.scheme == "https" || u.isFileURL || u.host == "127.0.0.1"
-        else { throw DollyError("risposta del sito non valida") }
+        else { throw DollyError(tr("risposta del sito non valida")) }
         return UpdateInfo(version: v, url: u, sha256: h.lowercased(), bytes: o["bytes"] as? Int ?? 0, notes: o["notes"] as? String ?? "")
     }
     private static func sync(_ rq: URLRequest) throws -> (Data, URLResponse) {
         var out: (Data, URLResponse)?, err: Error?; let sem = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: rq) { d, r, e in if let d = d, let r = r { out = (d, r) } else { err = e ?? DollyError("nessuna risposta") }; sem.signal() }.resume()
+        URLSession.shared.dataTask(with: rq) { d, r, e in if let d = d, let r = r { out = (d, r) } else { err = e ?? DollyError(tr("nessuna risposta")) }; sem.signal() }.resume()
         sem.wait(); if let o = out { return o }; throw err!
     }
     /// Scarica lo zip, controlla lo SHA-256, lo apre e verifica che dentro ci sia davvero Dolly Projector alla versione annunciata. Ritorna il percorso della nuova app.
@@ -35,16 +35,16 @@ enum Updater {
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         var got: URL?, err: Error?; let sem = DispatchSemaphore(value: 0)
         URLSession.shared.downloadTask(with: i.url) { u, r, e in
-            if let u = u, (r as? HTTPURLResponse)?.statusCode ?? 200 == 200 { let d = URL(fileURLWithPath: dir + "/app.zip"); try? FileManager.default.moveItem(at: u, to: d); got = d } else { err = e ?? DollyError("download non riuscito") }
+            if let u = u, (r as? HTTPURLResponse)?.statusCode ?? 200 == 200 { let d = URL(fileURLWithPath: dir + "/app.zip"); try? FileManager.default.moveItem(at: u, to: d); got = d } else { err = e ?? DollyError(tr("download non riuscito")) }
             sem.signal() }.resume()
         sem.wait(); guard let zip = got else { throw err! }
         let h = SHA256.hash(data: try Data(contentsOf: zip, options: .mappedIfSafe)).map { String(format: "%02x", $0) }.joined()
-        guard h == i.sha256 else { throw DollyError("il file scaricato non corrisponde (SHA-256 diverso): aggiornamento annullato") }
+        guard h == i.sha256 else { throw DollyError(tr("il file scaricato non corrisponde (SHA-256 diverso): aggiornamento annullato")) }
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto"); p.arguments = ["-x", "-k", zip.path, dir + "/x"]; try p.run(); p.waitUntilExit()
-        guard p.terminationStatus == 0, let app = (try? FileManager.default.contentsOfDirectory(atPath: dir + "/x"))?.first(where: { $0.hasSuffix(".app") }) else { throw DollyError("archivio non valido") }
+        guard p.terminationStatus == 0, let app = (try? FileManager.default.contentsOfDirectory(atPath: dir + "/x"))?.first(where: { $0.hasSuffix(".app") }) else { throw DollyError(tr("archivio non valido")) }
         let path = dir + "/x/" + app
         let info = NSDictionary(contentsOfFile: path + "/Contents/Info.plist")
-        guard info?["CFBundleIdentifier"] as? String == "app.dollyprojector.Dolly", info?["CFBundleShortVersionString"] as? String == i.version else { throw DollyError("l'archivio non contiene Dolly Projector \(i.version)") }
+        guard info?["CFBundleIdentifier"] as? String == "app.dollyprojector.Dolly", info?["CFBundleShortVersionString"] as? String == i.version else { throw DollyError(trf("l'archivio non contiene Dolly Projector %@", i.version)) }
         return path
     }
     /// Sostituisce l'app in esecuzione dopo la sua chiusura e la riapre. Se la cartella non è scrivibile, apre la nuova app dove si trova.
@@ -65,14 +65,14 @@ extension AppDelegate {
             let r = Result { try Updater.fetch() }
             DispatchQueue.main.async {
                 switch r {
-                case .failure(let e): self.updateAlert("Non riesco a controllare gli aggiornamenti", "Verifica la connessione a internet.\n(\(e))")
+                case .failure(let e): self.updateAlert(tr("Non riesco a controllare gli aggiornamenti"), trf("Verifica la connessione a internet.\n(%@)", "\(e)"))
                 case .success(let i):
-                    guard Updater.isNewer(i.version, than: Updater.current) else { self.updateAlert("Dolly Projector è aggiornato", "Hai già l'ultima versione (\(Updater.current))."); return }
+                    guard Updater.isNewer(i.version, than: Updater.current) else { self.updateAlert(tr("Dolly Projector è aggiornato"), trf("Hai già l'ultima versione (%@).", Updater.current)); return }
                     let busy = (self.model.engine?.snap.mode ?? "idle") != "idle"
-                    let a = NSAlert(); a.messageText = "È disponibile la versione \(i.version)"
-                    a.informativeText = "Hai la \(Updater.current). \(i.notes)\(i.notes.isEmpty ? "" : "\n\n")L'app viene scaricata (\(i.bytes / 1_000_000) MB), controllata e riaperta."
-                        + (busy ? "\n\n⚠︎ È in corso una proiezione: aggiornare la interromperà." : "")
-                    a.addButton(withTitle: "Aggiorna e riavvia"); a.addButton(withTitle: "Più tardi")
+                    let a = NSAlert(); a.messageText = trf("È disponibile la versione %@", i.version)
+                    a.informativeText = trf("Hai la %@. %@%@L'app viene scaricata (%d MB), controllata e riaperta.", Updater.current, i.notes, i.notes.isEmpty ? "" : "\n\n", i.bytes / 1_000_000)
+                        + (busy ? tr("\n\n⚠︎ È in corso una proiezione: aggiornare la interromperà.") : "")
+                    a.addButton(withTitle: tr("Aggiorna e riavvia")); a.addButton(withTitle: tr("Più tardi"))
                     if a.runModal() == .alertFirstButtonReturn { self.applyUpdate(i) }
                 }
             }
@@ -80,15 +80,15 @@ extension AppDelegate {
     }
     func applyUpdate(_ i: UpdateInfo) {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 90), styleMask: [.titled], backing: .buffered, defer: false)
-        w.title = "Aggiornamento"; let bar = NSProgressIndicator(frame: NSRect(x: 24, y: 28, width: 272, height: 16)); bar.style = .bar; bar.isIndeterminate = true; bar.startAnimation(nil)
-        let l = NSTextField(labelWithString: "Scarico Dolly Projector \(i.version)…"); l.frame = NSRect(x: 24, y: 52, width: 272, height: 20)
+        w.title = tr("Aggiornamento"); let bar = NSProgressIndicator(frame: NSRect(x: 24, y: 28, width: 272, height: 16)); bar.style = .bar; bar.isIndeterminate = true; bar.startAnimation(nil)
+        let l = NSTextField(labelWithString: trf("Scarico Dolly Projector %@…", i.version)); l.frame = NSRect(x: 24, y: 52, width: 272, height: 20)
         w.contentView?.addSubview(bar); w.contentView?.addSubview(l); w.center(); w.makeKeyAndOrderFront(nil)
         DispatchQueue.global().async {
             let r = Result { try Updater.download(i) }
             DispatchQueue.main.async {
                 w.close()
                 switch r {
-                case .failure(let e): self.updateAlert("Aggiornamento non riuscito", "\(e)")
+                case .failure(let e): self.updateAlert(tr("Aggiornamento non riuscito"), "\(e)")
                 case .success(let path): self.stopEngine(); Updater.installAndRelaunch(newApp: path); NSApp.terminate(nil)
                 }
             }

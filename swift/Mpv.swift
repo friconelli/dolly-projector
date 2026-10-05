@@ -24,7 +24,7 @@ final class Mpv {
             if FileManager.default.fileExists(atPath: sock) && p.isRunning { return }
             Thread.sleep(forTimeInterval: 0.1)
         }
-        throw DollyError("mpv non è partito")
+        throw DollyError(tr("mpv non è partito"))
     }
     var alive: Bool { proc?.isRunning ?? false }
     func kill() {
@@ -43,10 +43,10 @@ final class Mpv {
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var addr = sockaddr_un(); addr.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = Array(sock.utf8CString)
-        guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { throw DollyError("percorso socket troppo lungo") }
+        guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { throw DollyError(tr("percorso socket troppo lungo")) }
         withUnsafeMutablePointer(to: &addr.sun_path) { $0.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { p in for (i, c) in pathBytes.enumerated() { p[i] = c } } }
         let rc = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
-        guard rc == 0 else { throw DollyError("mpv non risponde (connect)") }
+        guard rc == 0 else { throw DollyError(tr("mpv non risponde (connect)")) }
 
         var ids: [Int: Int] = [:]; var out = [Any?](repeating: nil, count: cmds.count)
         for (i, c) in cmds.enumerated() {
@@ -56,7 +56,7 @@ final class Mpv {
             try data.withUnsafeBytes { raw in
                 while sent < data.count {
                     let n = send(fd, raw.baseAddress! + sent, data.count - sent, 0)
-                    if n <= 0 { throw DollyError("mpv non risponde (invio)") }
+                    if n <= 0 { throw DollyError(tr("mpv non risponde (invio)")) }
                     sent += n
                 }
             }
@@ -64,8 +64,8 @@ final class Mpv {
         var buf = Data(); var left = cmds.count; var chunk = [UInt8](repeating: 0, count: 65536)
         while left > 0 {
             let n = recv(fd, &chunk, chunk.count, 0)
-            if n < 0 { throw DollyError("mpv non risponde (timeout)") }
-            if n == 0 { throw DollyError("mpv ha chiuso la connessione") }
+            if n < 0 { throw DollyError(tr("mpv non risponde (timeout)")) }
+            if n == 0 { throw DollyError(tr("mpv ha chiuso la connessione")) }
             buf.append(chunk, count: n)
             while let nl = buf.firstIndex(of: 10) {
                 let line = buf[buf.startIndex..<nl]; buf = Data(buf[buf.index(after: nl)...])

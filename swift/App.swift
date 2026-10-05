@@ -1,13 +1,15 @@
 import SwiftUI
 import AppKit
 
-final class AppModel: ObservableObject { @Published var engine: Engine?; @Published var starting = true }
+final class AppModel: ObservableObject { @Published var engine: Engine?; @Published var starting = true; @Published var langRev = 0 }   // langRev: cambia quando si sceglie un'altra lingua e fa ridisegnare tutto
 struct HostView: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        if let e = model.engine { RootView(engine: e) }
-        else if model.starting { ProgressView("Avvio del player…").padding(60).frame(maxWidth: .infinity, maxHeight: .infinity) }
-        else { Text("Scegli la cartella dei film dal menu Dolly Projector").padding(60).frame(maxWidth: .infinity, maxHeight: .infinity) }
+        Group {
+            if let e = model.engine { RootView(engine: e) }
+            else if model.starting { ProgressView(tr("Avvio del player…")).padding(60).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else { Text(tr("Scegli la cartella dei film dal menu Dolly Projector")).padding(60).frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }.id(model.langRev)
     }
 }
 
@@ -38,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationDidFinishLaunching(_ n: Notification) {
         // niente rallentamenti di App Nap né stop del Mac mentre l'app è aperta
-        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled, .idleDisplaySleepDisabled, .latencyCritical], reason: "Proiezione")
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled, .idleDisplaySleepDisabled, .latencyCritical], reason: tr("Proiezione"))
         buildMenu()
         if folder() == nil && !chooseFolder() { NSApp.terminate(nil); return }
         let unclean = FileManager.default.fileExists(atPath: marker)
@@ -53,9 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func windowShouldClose(_ sender: NSWindow) -> Bool { NSApp.terminate(nil); return false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if !confirmed, let e = model.engine, e.snap.mode == "playing" || e.snap.mode == "wait" {
-            let a = NSAlert(); a.messageText = "Chiudere Dolly Projector?"
-            a.informativeText = "Il film in proiezione si interrompe e lo schermo della sala torna al nero."
-            a.addButton(withTitle: "Chiudi"); a.addButton(withTitle: "Annulla"); a.alertStyle = .warning
+            let a = NSAlert(); a.messageText = tr("Chiudere Dolly Projector?")
+            a.informativeText = tr("Il film in proiezione si interrompe e lo schermo della sala torna al nero.")
+            a.addButton(withTitle: tr("Chiudi")); a.addButton(withTitle: tr("Annulla")); a.alertStyle = .warning
             if a.runModal() != .alertFirstButtonReturn { return .terminateCancel }
         }
         stopEngine(); try? FileManager.default.removeItem(atPath: marker)
@@ -66,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func folder() -> String? { defaults.string(forKey: "folder").flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil } }
     @discardableResult func chooseFolder() -> Bool {
         let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false
-        p.message = "Scegli la cartella che contiene i film (mp4, avi, mkv)"; p.prompt = "Scegli"
+        p.message = tr("Scegli la cartella che contiene i film (mp4, avi, mkv)"); p.prompt = tr("Scegli")
         if let f = folder() { p.directoryURL = URL(fileURLWithPath: f) }
         guard p.runModal() == .OK, let u = p.url else { return false }
         defaults.set(u.path, forKey: "folder"); return true
@@ -94,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             self.startGroup.leave()
             DispatchQueue.main.async {
                 self.model.starting = false
-                switch r { case .success(let e): self.model.engine = e; RemoteControl.shared.engine = e; self.moveControlsAway(); case .failure(let e): showError("Non riesco ad avviare il player: \(e)") }
+                switch r { case .success(let e): self.model.engine = e; RemoteControl.shared.engine = e; self.moveControlsAway(); case .failure(let e): showError(trf("Non riesco ad avviare il player: %@", "\(e)")) }
             }
         }
     }
@@ -104,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         RemoteControl.shared.engine = nil; e?.shutdown(); model.engine = nil
     }
     func restartEngine() {
-        confirm("Cambiare impostazione interrompe la proiezione in corso. Continuare?", ok: "Continua") {
+        confirm(tr("Cambiare impostazione interrompe la proiezione in corso. Continuare?"), ok: tr("Continua")) {
             self.stopEngine()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.startEngine(autoresume: false) }
         }
@@ -114,13 +116,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             if self.chooseFolder() { self.stopEngine(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.startEngine(autoresume: false, resetPlaylist: true) } }
         }
         if let e = model.engine, e.snap.mode == "playing" || e.snap.mode == "wait" || e.snap.mode == "gap" {
-            confirm("Cambiare cartella interrompe la proiezione in corso e la scaletta riparte dai film della nuova cartella. Continuare?", ok: "Continua", go)
+            confirm(tr("Cambiare cartella interrompe la proiezione in corso e la scaletta riparte dai film della nuova cartella. Continuare?"), ok: tr("Continua"), go)
         } else { go() }
     }
     @objc func pickScreen(_ s: NSMenuItem) {
         let apply = { self.defaults.set(s.tag, forKey: "screen"); self.restartEngine() }
         if s.tag >= 0 && NSScreen.screens.count == 1 {
-            confirm("Con un solo schermo il player occuperà tutto lo schermo e coprirà i controlli (torni ai controlli con ⌘Tab). Continuare?", ok: "Continua", apply)
+            confirm(tr("Con un solo schermo il player occuperà tutto lo schermo e coprirà i controlli (torni ai controlli con ⌘Tab). Continuare?"), ok: tr("Continua"), apply)
         } else { apply() }
     }
     /// Se il player va a schermo intero sullo stesso schermo dei controlli, la finestra dei controlli passa su un altro schermo (se c'è).
@@ -162,11 +164,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let r = RemoteControl.shared; r.setEnabled(!r.enabled)
         guard r.enabled else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            let a = NSAlert(); a.messageText = "Telecomando attivo"
+            let a = NSAlert(); a.messageText = tr("Telecomando attivo")
             if let u = r.urls.first {
-                a.informativeText = "Sul telefono (stessa rete del Mac, anche senza internet) inquadra il codice o apri:\n\(u)\n\nPIN: \(r.pin)"
+                a.informativeText = trf("Sul telefono (stessa rete del Mac, anche senza internet) inquadra il codice o apri:\n%@\n\nPIN: %@", u, r.pin)
                 if let q = RemoteControl.qr(u) { q.size = NSSize(width: 150, height: 150); a.icon = q }
-            } else { a.informativeText = r.problem ?? "Nessuna rete trovata: collega il Mac al Wi-Fi o a un router." }
+            } else { a.informativeText = r.problem ?? tr("Nessuna rete trovata: collega il Mac al Wi-Fi o a un router.") }
             a.runModal()
         }
     }
@@ -174,33 +176,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if item.action == #selector(toggleRemote(_:)) { item.state = RemoteControl.shared.enabled ? .on : .off }
         return true
     }
+    @objc func setLang(_ s: NSMenuItem) {
+        Lang.setting = ["auto", "it", "en"][s.tag]
+        buildMenu(); model.langRev += 1
+    }
     func buildMenu() {
         let main = NSMenu(); NSApp.mainMenu = main
         func top(_ title: String) -> NSMenu { let m = NSMenu(title: title); let i = NSMenuItem(); i.submenu = m; main.addItem(i); return m }
         let app = top("Dolly Projector")
-        app.addItem(withTitle: "Cambia cartella dei film…", action: #selector(changeFolder), keyEquivalent: "").target = self
-        let sc = NSMenuItem(title: "Schermo della sala", action: nil, keyEquivalent: ""); let sm = NSMenu(); sm.delegate = self; sc.submenu = sm; app.addItem(sc)
-        app.addItem(withTitle: "Controlla aggiornamenti…", action: #selector(checkForUpdates(_:)), keyEquivalent: "").target = self
-        let rm = NSMenuItem(title: "Telecomando dal telefono", action: #selector(toggleRemote(_:)), keyEquivalent: ""); rm.target = self; app.addItem(rm)
+        app.addItem(withTitle: tr("Cambia cartella dei film…"), action: #selector(changeFolder), keyEquivalent: "").target = self
+        let sc = NSMenuItem(title: tr("Schermo della sala"), action: nil, keyEquivalent: ""); let sm = NSMenu(); sm.delegate = self; sc.submenu = sm; app.addItem(sc)
+        app.addItem(withTitle: tr("Controlla aggiornamenti…"), action: #selector(checkForUpdates(_:)), keyEquivalent: "").target = self
+        let rm = NSMenuItem(title: tr("Telecomando dal telefono"), action: #selector(toggleRemote(_:)), keyEquivalent: ""); rm.target = self; app.addItem(rm)
+        let lm = NSMenuItem(title: tr("Lingua"), action: nil, keyEquivalent: ""); let lsub = NSMenu()
+        for (n, (title, code)) in [(tr("Automatica"), "auto"), ("Italiano", "it"), ("English", "en")].enumerated() {
+            let it = NSMenuItem(title: title, action: #selector(setLang(_:)), keyEquivalent: ""); it.tag = n; it.target = self; it.state = Lang.setting == code ? .on : .off; lsub.addItem(it)
+        }
+        lm.submenu = lsub; app.addItem(lm)
         app.addItem(.separator())
-        app.addItem(withTitle: "Nascondi Dolly Projector", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        app.addItem(withTitle: "Esci da Dolly Projector", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        let edit = top("Modifica")
-        edit.addItem(withTitle: "Taglia", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "Copia", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Incolla", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Seleziona tutto", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        let win = top("Finestra")
-        win.addItem(withTitle: "Riduci a icona", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
+        app.addItem(withTitle: tr("Nascondi Dolly Projector"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        app.addItem(withTitle: tr("Esci da Dolly Projector"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let edit = top(tr("Modifica"))
+        edit.addItem(withTitle: tr("Taglia"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: tr("Copia"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: tr("Incolla"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: tr("Seleziona tutto"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let win = top(tr("Finestra"))
+        win.addItem(withTitle: tr("Riduci a icona"), action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
     }
     func menuNeedsUpdate(_ menu: NSMenu) {   // elenco schermi aggiornato ogni volta che si apre il menu (un proiettore può essere stato collegato dopo)
         menu.removeAllItems()
         for (i, s) in NSScreen.screens.enumerated() {
-            let it = NSMenuItem(title: "\(i + 1) · \(s.localizedName)\(i == 0 ? " (con la barra dei menu)" : "")", action: #selector(pickScreen(_:)), keyEquivalent: "")
+            let it = NSMenuItem(title: "\(i + 1) · \(s.localizedName)\(i == 0 ? tr(" (con la barra dei menu)") : "")", action: #selector(pickScreen(_:)), keyEquivalent: "")
             it.tag = i; it.target = self; it.state = (!windowedMode && i == screenIndex) ? .on : .off; menu.addItem(it)
         }
         menu.addItem(.separator())
-        let w = NSMenuItem(title: "Finestra (per le prove)", action: #selector(pickScreen(_:)), keyEquivalent: "")
+        let w = NSMenuItem(title: tr("Finestra (per le prove)"), action: #selector(pickScreen(_:)), keyEquivalent: "")
         w.tag = -1; w.target = self; w.state = windowedMode ? .on : .off; menu.addItem(w)
     }
 }
@@ -215,6 +226,7 @@ final class SnapshotRunner {
         let sz = (argValue("--size") ?? "1320x1100").split(separator: "x").compactMap { Double($0) }
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: sz.count == 2 ? sz[0] : 1320, height: sz.count == 2 ? sz[1] : 1100), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = host; window.orderBack(nil)
+        if ProcessInfo.processInfo.environment["DOLLY_DARK"] == "1" { window.appearance = NSAppearance(named: .darkAqua) }   // per gli screenshot del sito
         if let p = play { _ = engine.actSync(["a": "play", "i": p]) }
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
             host.layoutSubtreeIfNeeded()

@@ -4,11 +4,11 @@ import UniformTypeIdentifiers
 
 // MARK: utilità
 func confirm(_ message: String, ok: String = "OK", _ action: @escaping () -> Void) {
-    let a = NSAlert(); a.messageText = message; a.addButton(withTitle: ok); a.addButton(withTitle: "Annulla")
+    let a = NSAlert(); a.messageText = message; a.addButton(withTitle: ok); a.addButton(withTitle: tr("Annulla"))
     if let w = NSApp.keyWindow { a.beginSheetModal(for: w) { if $0 == .alertFirstButtonReturn { action() } } }
     else if a.runModal() == .alertFirstButtonReturn { action() }
 }
-func showError(_ m: String) { let a = NSAlert(); a.messageText = "Errore"; a.informativeText = m; a.alertStyle = .warning; a.runModal() }
+func showError(_ m: String) { let a = NSAlert(); a.messageText = tr("Errore"); a.informativeText = m; a.alertStyle = .warning; a.runModal() }
 func fmt(_ s: Double) -> String {
     let t = max(0, Int(s.rounded())); let h = t / 3600, m = t % 3600 / 60, sec = t % 60
     return h > 0 ? String(format: "%d:%02d:%02d", h, m, sec) : String(format: "%d:%02d", m, sec)
@@ -100,7 +100,7 @@ struct PropSlider: View {
             FieldLabel(label)
             Slider(value: Binding(get: { cur }, set: { drag = $0; engine.send(["a": "set", "p": prop, "v": $0]) }), in: range, step: step) { e in if !e { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { drag = nil } } }.controlSize(.small)
             Text(fmtv(cur)).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).frame(width: 54, alignment: .trailing)
-            if let r = reset { IconButton(symbol: "arrow.counterclockwise", help: "Valore iniziale", size: 11) { engine.send(["a": "set", "p": prop, "v": r]) } }
+            if let r = reset { IconButton(symbol: "arrow.counterclockwise", help: tr("Valore iniziale"), size: 11) { engine.send(["a": "set", "p": prop, "v": r]) } }
         }
     }
 }
@@ -162,9 +162,9 @@ struct HeaderBar: View {
             Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
             Spacer()
             if let e = s.err { Label(e, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange).lineLimit(1) }
-            else if s.restarts > 0 { Text("player riavviato \(s.restarts)×").font(.callout).foregroundStyle(.secondary) }
+            else if s.restarts > 0 { Text(trf("player riavviato %d×", s.restarts)).font(.callout).foregroundStyle(.secondary) }
             if let r = s.resume, s.mode == "idle", s.items.indices.contains(r.idx) {
-                Button { engine.send(["a": "resume"]) } label: { Label("Riprendi \(s.items[r.idx].label) da \(fmt(r.pos))", systemImage: "arrow.clockwise") }.buttonStyle(.bordered)
+                Button { engine.send(["a": "resume"]) } label: { Label(trf("Riprendi %@ da %@", s.items[r.idx].label, fmt(r.pos)), systemImage: "arrow.clockwise") }.buttonStyle(.bordered)
             }
             HStack(spacing: 6) { Circle().fill(color).frame(width: 8, height: 8); Text(pill).font(.system(size: 12, weight: .semibold)) }
                 .padding(.horizontal, 12).padding(.vertical, 5).background(Capsule().fill(color.opacity(0.14))).foregroundStyle(color)
@@ -172,19 +172,19 @@ struct HeaderBar: View {
     }
     var title: String {
         switch s.mode {
-        case "gap": return s.label.isEmpty ? "Nero" : s.label
+        case "gap": return s.label.isEmpty ? tr("Nero") : s.label
         case "playing", "wait": return current
-        default: return s.items.indices.contains(s.sel) ? "Prossimo: " + s.items[s.sel].label : "Nessun elemento"
+        default: return s.items.indices.contains(s.sel) ? tr("Prossimo: ") + s.items[s.sel].label : tr("Nessun elemento")
         }
     }
     var looping: Bool { let v = s.s("loop-file"); return !v.isEmpty && v != "no" }
     var pill: String {
-        if !s.ok { return "player non risponde" }
+        if !s.ok { return tr("player non risponde") }
         switch s.mode {
-        case "gap": return "NERO \(Int(s.left))″"
-        case "wait": return "INTERVALLO \(fmt(s.left))"
-        case "playing": return s.pause ? "IN PAUSA" : (looping ? "IN ONDA · RIPETE" : "IN ONDA")
-        default: return "PRONTO"
+        case "gap": return trf("NERO %d″", Int(s.left))
+        case "wait": return trf("INTERVALLO %@", fmt(s.left))
+        case "playing": return s.pause ? tr("IN PAUSA") : (looping ? tr("IN ONDA · RIPETE") : tr("IN ONDA"))
+        default: return tr("PRONTO")
         }
     }
     var color: Color { !s.ok ? .red : s.mode == "playing" ? (s.pause ? .orange : cueRed) : (s.mode == "gap" || s.mode == "wait") ? .orange : .secondary }
@@ -230,25 +230,25 @@ struct ScalettaPanel: View {
     @State private var nameText = ""; @FocusState private var nameFocus: Bool
     @State private var gear: Int?
     @State private var showPause = false; @State private var showBlack = false
-    @State private var pmin = "10"; @State private var ptxt = "Intervallo"; @State private var bsec = "5"
+    @State private var pmin = "10"; @State private var ptxt = tr("Intervallo"); @State private var bsec = "5"
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "list.bullet.rectangle").foregroundStyle(.secondary)
-                TextField("Nome della scena", text: $nameText).textFieldStyle(.plain).font(.system(size: 14, weight: .semibold)).focused($nameFocus).onSubmit { engine.send(["a": "rename", "v": nameText]) }
+                TextField(tr("Nome della scena"), text: $nameText).textFieldStyle(.plain).font(.system(size: 14, weight: .semibold)).focused($nameFocus).onSubmit { engine.send(["a": "rename", "v": nameText]) }
                 Menu {
-                    Button("Salva la scena") { engine.send(["a": "rename", "v": nameText]); engine.send(["a": "pl_save", "name": nameText]) }
-                    Menu("Apri una scena salvata") { ForEach(s.saved, id: \.self) { n in Button(n) { confirmIf(!s.items.isEmpty, "Sostituire la scaletta corrente con “\(n)”?") { engine.send(["a": "pl_load", "name": n]) } } } }.disabled(s.saved.isEmpty)
-                    Menu("Elimina una scena salvata") { ForEach(s.saved, id: \.self) { n in Button(n) { confirm("Eliminare la scena salvata “\(n)”?") { engine.send(["a": "pl_delete", "name": n]) } } } }.disabled(s.saved.isEmpty)
+                    Button(tr("Salva la scena")) { engine.send(["a": "rename", "v": nameText]); engine.send(["a": "pl_save", "name": nameText]) }
+                    Menu(tr("Apri una scena salvata")) { ForEach(s.saved, id: \.self) { n in Button(n) { confirmIf(!s.items.isEmpty, trf("Sostituire la scaletta corrente con “%@”?", n)) { engine.send(["a": "pl_load", "name": n]) } } } }.disabled(s.saved.isEmpty)
+                    Menu(tr("Elimina una scena salvata")) { ForEach(s.saved, id: \.self) { n in Button(n) { confirm(trf("Eliminare la scena salvata “%@”?", n)) { engine.send(["a": "pl_delete", "name": n]) } } } }.disabled(s.saved.isEmpty)
                     Divider()
-                    Button("Importa una playlist .m3u…") { if let p = pickFiles(types: ["m3u", "m3u8"], multiple: false, prompt: "Scegli una scaletta (.m3u)").first { engine.send(["a": "pl_import", "path": p]) } }
-                    Button("Svuota la scaletta") { confirm("Svuotare la scaletta?") { engine.send(["a": "clear"]) } }
+                    Button(tr("Importa una playlist .m3u…")) { if let p = pickFiles(types: ["m3u", "m3u8"], multiple: false, prompt: tr("Scegli una scaletta (.m3u)")).first { engine.send(["a": "pl_import", "path": p]) } }
+                    Button(tr("Svuota la scaletta")) { confirm(tr("Svuotare la scaletta?")) { engine.send(["a": "clear"]) } }
                 } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).frame(width: 28)
             }.padding(.horizontal, 14).padding(.vertical, 10)
             Divider()
             if s.items.isEmpty {
-                VStack(spacing: 8) { Image(systemName: "film.stack").font(.system(size: 30)).foregroundStyle(.tertiary); Text("Scaletta vuota").foregroundStyle(.secondary)
-                    Text("Aggiungi film con il pulsante + qui sotto, oppure trascinali qui dal Finder.").font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center) }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 8) { Image(systemName: "film.stack").font(.system(size: 30)).foregroundStyle(.tertiary); Text(tr("Scaletta vuota")).foregroundStyle(.secondary)
+                    Text(tr("Aggiungi film con il pulsante + qui sotto, oppure trascinali qui dal Finder.")).font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center) }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.accentColor.opacity(dropTarget ? 0.8 : 0), style: StrokeStyle(lineWidth: 2, dash: [6])).padding(8))
                     .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in fileURLs(from: providers) { engine.send(["a": "add", "paths": $0]) }; return true }
             } else {
@@ -267,30 +267,30 @@ struct ScalettaPanel: View {
             Divider()
             HStack(spacing: 8) {
                 Menu {
-                    Button("Film (mp4, avi, mkv)…") { let p = pickFiles(prompt: "Aggiungi film (mp4, avi, mkv)"); if !p.isEmpty { engine.send(["a": "add", "paths": p]) } }
-                    Button("Tutti i film di una cartella…") { let p = pickFiles(folders: true, multiple: false, prompt: "Aggiungi tutti i film di una cartella"); if !p.isEmpty { engine.send(["a": "add", "paths": p]) } }
-                    Button("Tutta la libreria") { engine.send(["a": "addlib"]) }
+                    Button(tr("Film (mp4, avi, mkv)…")) { let p = pickFiles(prompt: tr("Aggiungi film (mp4, avi, mkv)")); if !p.isEmpty { engine.send(["a": "add", "paths": p]) } }
+                    Button(tr("Tutti i film di una cartella…")) { let p = pickFiles(folders: true, multiple: false, prompt: tr("Aggiungi tutti i film di una cartella")); if !p.isEmpty { engine.send(["a": "add", "paths": p]) } }
+                    Button(tr("Tutta la libreria")) { engine.send(["a": "addlib"]) }
                     Divider()
-                    Button("Nero (secondi)…") { showBlack = true }
-                    Button("Intervallo con conto alla rovescia…") { showPause = true }
-                } label: { Label("Aggiungi", systemImage: "plus") }.menuStyle(.borderlessButton).fixedSize()
+                    Button(tr("Nero (secondi)…")) { showBlack = true }
+                    Button(tr("Intervallo con conto alla rovescia…")) { showPause = true }
+                } label: { Label(tr("Aggiungi"), systemImage: "plus") }.menuStyle(.borderlessButton).fixedSize()
                 Spacer()
-                Text("\(s.items.count) elementi").font(.caption).foregroundStyle(.secondary)
+                Text(trf("%d elementi", s.items.count)).font(.caption).foregroundStyle(.secondary)
             }.padding(.horizontal, 14).padding(.vertical, 8)
         }
         .onAppear { nameText = s.name }.onChange(of: s.name) { if !nameFocus { nameText = $0 } }
         .popover(isPresented: $showBlack, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 10) { Text("Aggiungi un nero").font(.headline)
+            VStack(alignment: .leading, spacing: 10) { Text(tr("Aggiungi un nero")).font(.headline)
                 HStack { TextField("5", text: $bsec).textFieldStyle(.roundedBorder).frame(width: 60); Text("secondi") }
-                Text("Schermo nero tra due elementi, senza scritte.").font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("Aggiungi") { engine.send(["a": "addblack", "secs": Double(bsec.replacingOccurrences(of: ",", with: ".")) ?? 5]); showBlack = false }.keyboardShortcut(.defaultAction) } }.padding(14).frame(width: 260)
+                Text(tr("Schermo nero tra due elementi, senza scritte.")).font(.caption).foregroundStyle(.secondary)
+                HStack { Spacer(); Button(tr("Aggiungi")) { engine.send(["a": "addblack", "secs": Double(bsec.replacingOccurrences(of: ",", with: ".")) ?? 5]); showBlack = false }.keyboardShortcut(.defaultAction) } }.padding(14).frame(width: 260)
         }
         .popover(isPresented: $showPause, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 10) { Text("Aggiungi un intervallo").font(.headline)
+            VStack(alignment: .leading, spacing: 10) { Text(tr("Aggiungi un intervallo")).font(.headline)
                 HStack { TextField("10", text: $pmin).textFieldStyle(.roundedBorder).frame(width: 60); Text("minuti") }
-                TextField("Testo sullo schermo", text: $ptxt).textFieldStyle(.roundedBorder)
-                Text("Sullo schermo della sala compaiono il testo e il tempo che manca.").font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("Aggiungi") { engine.send(["a": "addpause", "secs": (Double(pmin) ?? 10) * 60, "text": ptxt]); showPause = false }.keyboardShortcut(.defaultAction) } }.padding(14).frame(width: 300)
+                TextField(tr("Testo sullo schermo"), text: $ptxt).textFieldStyle(.roundedBorder)
+                Text(tr("Sullo schermo della sala compaiono il testo e il tempo che manca.")).font(.caption).foregroundStyle(.secondary)
+                HStack { Spacer(); Button(tr("Aggiungi")) { engine.send(["a": "addpause", "secs": (Double(pmin) ?? 10) * 60, "text": ptxt]); showPause = false }.keyboardShortcut(.defaultAction) } }.padding(14).frame(width: 300)
         }
     }
     func confirmIf(_ c: Bool, _ m: String, _ a: @escaping () -> Void) { if c { confirm(m, a) } else { a() } }
@@ -307,14 +307,14 @@ struct ItemRow: View {
             Button { play() } label: {
                 ZStack { RoundedRectangle(cornerRadius: 7, style: .continuous).fill(cur ? cueRed : Color.primary.opacity(0.10)).frame(width: 30, height: 30)
                     Image(systemName: cur ? "waveform" : (hover ? "play.fill" : icon)).font(.system(size: 12, weight: .semibold)).foregroundStyle(cur ? .white : .secondary) }
-            }.buttonStyle(.plain).help("Avvia")
+            }.buttonStyle(.plain).help(tr("Avvia"))
             VStack(alignment: .leading, spacing: 1) {
                 Text(it.label).font(.system(size: 13, weight: .medium)).strikethrough(!it.ok).foregroundStyle(it.ok ? Color.primary : .red).lineLimit(1)
                 if !caption.isEmpty { Text(caption).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer(minLength: 4)
-            if it.loop != 0 { Image(systemName: "repeat").font(.system(size: 11)).foregroundStyle(.secondary).help(it.loop < 0 ? "Si ripete all'infinito" : "Si ripete \(it.loop) volte") }
-            IconButton(symbol: "slider.horizontal.3", help: "Impostazioni di questo elemento") { gear = gear == i ? nil : i }
+            if it.loop != 0 { Image(systemName: "repeat").font(.system(size: 11)).foregroundStyle(.secondary).help(it.loop < 0 ? tr("Si ripete all'infinito") : trf("Si ripete %d volte", it.loop)) }
+            IconButton(symbol: "slider.horizontal.3", help: tr("Impostazioni di questo elemento")) { gear = gear == i ? nil : i }
                 .popover(isPresented: Binding(get: { gear == i }, set: { if !$0 && gear == i { gear = nil } }), arrowEdge: .trailing) { ItemSettings(engine: engine, i: i, it: it).frame(width: 340) }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
@@ -323,24 +323,24 @@ struct ItemRow: View {
         .onHover { hover = $0 }
         .onTapGesture(count: 2) { play() }
         .contextMenu {
-            Button("Avvia") { play() }; Button("Impostazioni…") { gear = i }; Divider()
-            Button("Sposta su") { engine.send(["a": "move", "i": i, "d": -1]) }.disabled(i == 0)
-            Button("Sposta giù") { engine.send(["a": "move", "i": i, "d": 1]) }.disabled(i == s.items.count - 1)
-            Divider(); Button("Rimuovi dalla scaletta") { confirm("Togliere dalla scaletta?") { engine.send(["a": "remove", "i": i]) } }
+            Button(tr("Avvia")) { play() }; Button(tr("Impostazioni…")) { gear = i }; Divider()
+            Button(tr("Sposta su")) { engine.send(["a": "move", "i": i, "d": -1]) }.disabled(i == 0)
+            Button(tr("Sposta giù")) { engine.send(["a": "move", "i": i, "d": 1]) }.disabled(i == s.items.count - 1)
+            Divider(); Button(tr("Rimuovi dalla scaletta")) { confirm(tr("Togliere dalla scaletta?")) { engine.send(["a": "remove", "i": i]) } }
         }
     }
     var icon: String { it.kind == "pausa" ? "cup.and.saucer" : it.kind == "nero" ? "moon.zzz" : "film" }
     var caption: String {
         var p: [String] = []
         if it.kind == "pausa" || it.kind == "nero" { p.append(fmt(it.secs)) }
-        if let a = it.pre { p.append("nero prima \(Int(a))″") }
-        if let a = it.post { p.append("nero dopo \(Int(a))″") }
+        if let a = it.pre { p.append(trf("nero prima %d″", Int(a))) }
+        if let a = it.post { p.append(trf("nero dopo %d″", Int(a))) }
         if !it.alang.isEmpty || !it.slang.isEmpty { p.append((it.alang.isEmpty ? "—" : it.alang) + " → " + (it.slang.isEmpty ? "—" : it.slang)) }
-        if let m = it.submode { p.append(["file": "sott. del file", "none": "senza sott.", "forced": "sott. forzati", "full": "sott. completi"][m] ?? "") }
-        if let v = it.vol { p.append("vol \(Int(v))%") }
+        if let m = it.submode { p.append(["file": tr("sott. del file"), "none": tr("senza sott."), "forced": tr("sott. forzati"), "full": tr("sott. completi")][m] ?? "") }
+        if let v = it.vol { p.append(trf("vol %d%%", Int(v))) }
         return p.joined(separator: " · ")
     }
-    func play() { if s.mode == "idle" { engine.send(["a": "play", "i": i]) } else { confirm("Cambiare? Quello in corso si interrompe.") { engine.send(["a": "play", "i": i]) } } }
+    func play() { if s.mode == "idle" { engine.send(["a": "play", "i": i]) } else { confirm(tr("Cambiare? Quello in corso si interrompe.")) { engine.send(["a": "play", "i": i]) } } }
 }
 
 /// Impostazioni di un singolo elemento (riquadro a comparsa, niente accordion).
@@ -352,27 +352,27 @@ struct ItemSettings: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(it.label).font(.headline).lineLimit(1)
             if it.kind == "pausa" || it.kind == "nero" {
-                if it.kind == "pausa" { TextRow(label: "Testo", value: it.text, placeholder: "Intervallo") { engine.send(["a": "setitem", "i": i, "text": $0]) } }
-                OptField(label: "Durata (s)", value: it.secs, placeholder: "") { engine.send(["a": "setitem", "i": i, "secs": $0]) }
+                if it.kind == "pausa" { TextRow(label: tr("Testo"), value: it.text, placeholder: tr("Intervallo")) { engine.send(["a": "setitem", "i": i, "text": $0]) } }
+                OptField(label: tr("Durata (s)"), value: it.secs, placeholder: "") { engine.send(["a": "setitem", "i": i, "secs": $0]) }
             } else {
                 Group {
-                    OptField(label: "Nero prima (s)", value: it.pre, placeholder: n(s.defpre)) { engine.send(["a": "setitem", "i": i, "pre": $0]) }
-                    OptField(label: "Nero dopo (s)", value: it.post, placeholder: n(s.defpost)) { engine.send(["a": "setitem", "i": i, "post": $0]) }
+                    OptField(label: tr("Nero prima (s)"), value: it.pre, placeholder: n(s.defpre)) { engine.send(["a": "setitem", "i": i, "pre": $0]) }
+                    OptField(label: tr("Nero dopo (s)"), value: it.post, placeholder: n(s.defpost)) { engine.send(["a": "setitem", "i": i, "post": $0]) }
                     OptField(label: "Volume %", value: it.vol, placeholder: "invariato") { engine.send(["a": "setitem", "i": i, "vol": $0]) }
                 }
                 Divider()
-                TextRow(label: "Audio (lingua)", value: it.alang, placeholder: "ita,it") { engine.send(["a": "setitem", "i": i, "alang": $0]) }
-                TextRow(label: "Sott. (lingua)", value: it.slang, placeholder: "es. ita") { engine.send(["a": "setitem", "i": i, "slang": $0]) }
-                HStack { FieldLabel("Sottotitoli")
+                TextRow(label: tr("Audio (lingua)"), value: it.alang, placeholder: "ita,it") { engine.send(["a": "setitem", "i": i, "alang": $0]) }
+                TextRow(label: tr("Sott. (lingua)"), value: it.slang, placeholder: tr("es. ita")) { engine.send(["a": "setitem", "i": i, "slang": $0]) }
+                HStack { FieldLabel(tr("Sottotitoli"))
                     Picker("", selection: Binding(get: { it.submode ?? "" }, set: { engine.send(["a": "setitem", "i": i, "submode": $0]) })) {
-                        Text("Come la scena").tag(""); Text("Come nel file").tag("file"); Text("Nessuno").tag("none"); Text("Solo forzati").tag("forced"); Text("Completi").tag("full") }.labelsHidden() }
-                Text("Lingue: codici a 3 lettere separati da virgola (ita, eng, fre…). Se il film è in corso, la modifica vale subito.").font(.caption).foregroundStyle(.secondary)
+                        Text(tr("Come la scena")).tag(""); Text(tr("Come nel file")).tag("file"); Text(tr("Nessuno")).tag("none"); Text(tr("Solo forzati")).tag("forced"); Text(tr("Completi")).tag("full") }.labelsHidden() }
+                Text(tr("Lingue: codici a 3 lettere separati da virgola (ita, eng, fre…). Se il film è in corso, la modifica vale subito.")).font(.caption).foregroundStyle(.secondary)
                 Divider()
-                HStack { FieldLabel("Ripetizione")
+                HStack { FieldLabel(tr("Ripetizione"))
                     Picker("", selection: Binding(get: { it.loop < 0 ? -1 : it.loop == 0 ? 0 : 1 }, set: { engine.send(["a": "setitem", "i": i, "loop": $0 == 1 ? 1 : $0]) })) {
-                        Text("Nessuna").tag(0); Text("Infinita").tag(-1); Text("Un numero di volte").tag(1) }.labelsHidden() }
-                if it.loop > 0 { OptField(label: "Volte in più", value: Double(it.loop), placeholder: "1") { engine.send(["a": "setitem", "i": i, "loop": Double($0) ?? 1]) } }
-                Text("Un film in ripetizione continua finché non togli “Ripeti” dai controlli; poi la scaletta prosegue.").font(.caption).foregroundStyle(.secondary)
+                        Text(tr("Nessuna")).tag(0); Text(tr("Infinita")).tag(-1); Text(tr("Un numero di volte")).tag(1) }.labelsHidden() }
+                if it.loop > 0 { OptField(label: tr("Volte in più"), value: Double(it.loop), placeholder: "1") { engine.send(["a": "setitem", "i": i, "loop": Double($0) ?? 1]) } }
+                Text(tr("Un film in ripetizione continua finché non togli “Ripeti” dai controlli; poi la scaletta prosegue.")).font(.caption).foregroundStyle(.secondary)
             }
         }.padding(14)
     }
@@ -397,10 +397,10 @@ struct MonitorPanel: View {
     var monitor: some View {
         ZStack {
             Rectangle().fill(.black)
-            if on && live.status == .live { LiveLayerView(layer: live.layer) }
+            if on && live.status == .live && !clean { LiveLayerView(layer: live.layer) }   // (con DOLLY_CLEAN, solo screenshot: sempre l'immagine del motore)
             else if on, s.mode == "playing", let im = engine.previewImage { Image(nsImage: im).resizable().scaledToFit() }
             else if s.mode == "wait" { Text(s.items.indices.contains(s.idx) && s.items[s.idx].kind == "pausa" ? (s.items[s.idx].text + "\n" + fmt(s.left)) : "").multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.75)).font(.title2) }
-            else { Text(s.mode == "playing" ? (on ? "Anteprima in arrivo…" : "Anteprima spenta") : "NERO").font(.system(size: 13, weight: .medium)).tracking(2).foregroundStyle(.white.opacity(0.35)) }
+            else { Text(s.mode == "playing" ? (on ? tr("Anteprima in arrivo…") : tr("Anteprima spenta")) : tr("NERO")).font(.system(size: 13, weight: .medium)).tracking(2).foregroundStyle(.white.opacity(0.35)) }
             VStack { HStack {
                 Text(badge).font(.system(size: 10, weight: .bold)).tracking(1).padding(.horizontal, 7).padding(.vertical, 3).background(Capsule().fill(badgeColor)).foregroundStyle(.white)
                 Spacer()
@@ -410,20 +410,20 @@ struct MonitorPanel: View {
         .aspectRatio(16 / 9, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.15)))
         .overlay(alignment: .bottomTrailing) { if on && live.status == .noPermission && !clean { permissionHint.padding(10) } }
-        .contextMenu { Toggle("Anteprima attiva", isOn: $on) }
+        .contextMenu { Toggle(tr("Anteprima attiva"), isOn: $on) }
     }
-    var badge: String { s.mode == "playing" ? "PROIETTORE" : s.mode == "wait" ? "INTERVALLO" : "NERO" }
+    var badge: String { s.mode == "playing" ? tr("PROIETTORE") : s.mode == "wait" ? tr("INTERVALLO") : tr("NERO") }
     var badgeColor: Color { s.mode == "playing" ? cueRed.opacity(0.9) : Color.white.opacity(0.18) }
-    var note: String { live.status == .noPermission ? "anteprima a scatti (manca il permesso)" : "anteprima a scatti" }
+    var note: String { live.status == .noPermission ? tr("anteprima a scatti (manca il permesso)") : tr("anteprima a scatti") }
     var permissionHint: some View {
-        Button { live.requestPermission() } label: { Label("Consenti l'anteprima fluida", systemImage: "play.rectangle.on.rectangle") }.buttonStyle(.borderedProminent).controlSize(.small)
-            .help("Dolly Projector mostra la finestra del proiettore con la Registrazione schermo di macOS. Consenti Dolly Projector in Impostazioni → Privacy e sicurezza → Registrazione schermo e riapri l'app.")
+        Button { live.requestPermission() } label: { Label(tr("Consenti l'anteprima fluida"), systemImage: "play.rectangle.on.rectangle") }.buttonStyle(.borderedProminent).controlSize(.small)
+            .help(tr("Dolly Projector mostra la finestra del proiettore con la Registrazione schermo di macOS. Consenti Dolly Projector in Impostazioni → Privacy e sicurezza → Registrazione schermo e riapri l'app."))
     }
     var timecode: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             if s.mode == "gap" || s.mode == "wait" {
                 Text(fmt(s.left)).font(.system(size: 30, weight: .medium, design: .monospaced)).foregroundStyle(.orange)
-                Text(s.mode == "gap" ? "nero prima di “\(s.items.indices.contains(s.next) ? s.items[s.next].label : "")”" : "intervallo").foregroundStyle(.secondary)
+                Text(s.mode == "gap" ? trf("nero prima di “%@”", s.items.indices.contains(s.next) ? s.items[s.next].label : "") : tr("intervallo")).foregroundStyle(.secondary)
             } else {
                 Text(tc(s.time)).font(.system(size: 30, weight: .medium, design: .monospaced))
                 Text("−\(tc(max(0, s.dur - s.time)))").font(.system(size: 14, design: .monospaced)).foregroundStyle(.secondary)
@@ -437,19 +437,19 @@ struct MonitorPanel: View {
     var transport: some View {
         VStack(spacing: 14) {
             HStack(spacing: 22) {
-                Button { engine.send(["a": "prev"]) } label: { Image(systemName: "backward.end.fill").font(.system(size: 17)) }.help("Inizio del film / precedente")
+                Button { engine.send(["a": "prev"]) } label: { Image(systemName: "backward.end.fill").font(.system(size: 17)) }.help(tr("Inizio del film / precedente"))
                 Button { engine.send(["a": "toggle"]) } label: {
                     Image(systemName: s.mode == "playing" && !s.pause ? "pause.fill" : "play.fill").font(.system(size: 22, weight: .semibold)).foregroundStyle(.white).frame(width: 54, height: 54).background(Circle().fill(Color.accentColor))
-                }.help("Avvia / pausa (spazio)")
-                Button { engine.send(["a": "next"]) } label: { Image(systemName: "forward.end.fill").font(.system(size: 17)) }.help("Successivo")
-                Button { confirm("Fermare e tornare allo schermo nero?") { engine.send(["a": "stop"]) } } label: { Image(systemName: "stop.fill").font(.system(size: 15)) }.help("Ferma e schermo nero")
-                if s.mode == "gap" || s.mode == "wait" { Button { engine.send(["a": "skipgap"]) } label: { Label("Salta", systemImage: "forward.fill") }.buttonStyle(.bordered) }
-                if s.mode == "wait" { Button { engine.send(["a": "extend", "v": 60]) } label: { Label("+1 min", systemImage: "plus") }.buttonStyle(.bordered) }
+                }.help(tr("Avvia / pausa (spazio)"))
+                Button { engine.send(["a": "next"]) } label: { Image(systemName: "forward.end.fill").font(.system(size: 17)) }.help(tr("Successivo"))
+                Button { confirm(tr("Fermare e tornare allo schermo nero?")) { engine.send(["a": "stop"]) } } label: { Image(systemName: "stop.fill").font(.system(size: 15)) }.help(tr("Ferma e schermo nero"))
+                if s.mode == "gap" || s.mode == "wait" { Button { engine.send(["a": "skipgap"]) } label: { Label(tr("Salta"), systemImage: "forward.fill") }.buttonStyle(.bordered) }
+                if s.mode == "wait" { Button { engine.send(["a": "extend", "v": 60]) } label: { Label(tr("+1 min"), systemImage: "plus") }.buttonStyle(.bordered) }
             }.buttonStyle(.plain)
             HStack(spacing: 8) {
-                PillToggle(symbol: "repeat", label: "Ripeti", isOn: Binding(get: { let v = s.s("loop-file"); return !v.isEmpty && v != "no" }, set: { engine.send(["a": "set", "p": "loop-file", "v": $0 ? "inf" : "no"]) }), help: "Il film in corso ricomincia da capo; togli per proseguire con la scaletta")
-                PillToggle(symbol: "eye.slash", label: "Nero immagine", isOn: Binding(get: { s.video.count > 0 && !s.video.contains { $0.sel } }, set: { engine.send(["a": "vid", "v": $0 ? "no" : "auto"]) }), help: "Toglie l’immagine, l’audio continua")
-                PillToggle(symbol: "speaker.slash", label: "Muto", isOn: Binding(get: { s.b("mute") }, set: { engine.send(["a": "set", "p": "mute", "v": $0]) }))
+                PillToggle(symbol: "repeat", label: tr("Ripeti"), isOn: Binding(get: { let v = s.s("loop-file"); return !v.isEmpty && v != "no" }, set: { engine.send(["a": "set", "p": "loop-file", "v": $0 ? "inf" : "no"]) }), help: tr("Il film in corso ricomincia da capo; togli per proseguire con la scaletta"))
+                PillToggle(symbol: "eye.slash", label: tr("Nero immagine"), isOn: Binding(get: { s.video.count > 0 && !s.video.contains { $0.sel } }, set: { engine.send(["a": "vid", "v": $0 ? "no" : "auto"]) }), help: tr("Toglie l’immagine, l’audio continua"))
+                PillToggle(symbol: "speaker.slash", label: tr("Muto"), isOn: Binding(get: { s.b("mute") }, set: { engine.send(["a": "set", "p": "mute", "v": $0]) }))
                 Spacer()
                 Image(systemName: "speaker.fill").font(.system(size: 11)).foregroundStyle(.secondary)
                 VolumeSlider(engine: engine).frame(width: 130)
@@ -474,7 +474,7 @@ struct VolumeSlider: View {
 struct Inspector: View {
     @ObservedObject var engine: Engine
     @State private var tab = Int(ProcessInfo.processInfo.environment["DOLLY_TAB"] ?? "") ?? 0   // (DOLLY_TAB serve solo per gli screenshot di verifica)
-    let tabs: [(String, String)] = [("slider.horizontal.3", "Scena"), ("speaker.wave.2", "Audio"), ("captions.bubble", "Sottotitoli"), ("camera.filters", "Immagine"), ("ellipsis.circle", "Altro")]
+    let tabs: [(String, String)] = [("slider.horizontal.3", tr("Scena")), ("speaker.wave.2", tr("Audio")), ("captions.bubble", tr("Sottotitoli")), ("camera.filters", tr("Immagine")), ("ellipsis.circle", tr("Altro"))]
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 2) {
@@ -507,24 +507,24 @@ struct SceneTab: View {
     var s: Snap { engine.snap }
     @State private var libOpen = false
     var body: some View {
-        Card(title: "Nero e avanzamento", symbol: "moon.zzz") {
-            OptField(label: "Nero iniziale (s)", value: s.defpre, placeholder: "0") { engine.send(["a": "defaults", "defpre": Double($0) ?? 0]) }
-            OptField(label: "Nero finale (s)", value: s.defpost, placeholder: "0") { engine.send(["a": "defaults", "defpost": Double($0) ?? 0]) }
-            Text("Ogni elemento può avere il suo valore (icona delle impostazioni nella scaletta). Tra due elementi il nero è: finale del primo + iniziale del secondo.").font(.caption).foregroundStyle(.secondary)
-            Toggle("Avanza automaticamente", isOn: Binding(get: { s.auto }, set: { engine.send(["a": "defaults", "auto": $0]) })).toggleStyle(.switch)
-            Toggle("Ripeti la scaletta", isOn: Binding(get: { s.loop }, set: { engine.send(["a": "defaults", "loop": $0]) })).toggleStyle(.switch)
+        Card(title: tr("Nero e avanzamento"), symbol: "moon.zzz") {
+            OptField(label: tr("Nero iniziale (s)"), value: s.defpre, placeholder: "0") { engine.send(["a": "defaults", "defpre": Double($0) ?? 0]) }
+            OptField(label: tr("Nero finale (s)"), value: s.defpost, placeholder: "0") { engine.send(["a": "defaults", "defpost": Double($0) ?? 0]) }
+            Text(tr("Ogni elemento può avere il suo valore (icona delle impostazioni nella scaletta). Tra due elementi il nero è: finale del primo + iniziale del secondo.")).font(.caption).foregroundStyle(.secondary)
+            Toggle(tr("Avanza automaticamente"), isOn: Binding(get: { s.auto }, set: { engine.send(["a": "defaults", "auto": $0]) })).toggleStyle(.switch)
+            Toggle(tr("Ripeti la scaletta"), isOn: Binding(get: { s.loop }, set: { engine.send(["a": "defaults", "loop": $0]) })).toggleStyle(.switch)
         }
-        Card(title: "Sottotitoli della scena", symbol: "captions.bubble") {
+        Card(title: tr("Sottotitoli della scena"), symbol: "captions.bubble") {
             Picker("", selection: Binding(get: { s.defsub }, set: { engine.send(["a": "defaults", "defsub": $0]) })) {
-                Text("Come nel file").tag("file"); Text("Nessuno").tag("none"); Text("Solo forzati").tag("forced"); Text("Completi").tag("full") }.pickerStyle(.segmented).labelsHidden()
-            Text(["file": "Si accende la traccia che il file indica come predefinita.", "none": "Nessun sottotitolo, a meno che un film non ne chieda.", "forced": "Solo i sottotitoli “forzati”: le traduzioni dei dialoghi stranieri.", "full": "Sottotitoli completi nella lingua dell’audio."][s.defsub] ?? "")
+                Text(tr("Come nel file")).tag("file"); Text(tr("Nessuno")).tag("none"); Text(tr("Solo forzati")).tag("forced"); Text(tr("Completi")).tag("full") }.pickerStyle(.segmented).labelsHidden()
+            Text(["file": tr("Si accende la traccia che il file indica come predefinita."), "none": tr("Nessun sottotitolo, a meno che un film non ne chieda."), "forced": tr("Solo i sottotitoli “forzati”: le traduzioni dei dialoghi stranieri."), "full": tr("Sottotitoli completi nella lingua dell’audio.")][s.defsub] ?? "")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        Card(title: "Cartella dei film", symbol: "folder") {
-            HStack { Text((s.folder as NSString).lastPathComponent).lineLimit(1); Spacer(); Button("Cambia…") { appDelegate.changeFolder() }.help("La scaletta riparte dai film della nuova cartella") }
-            Button(libOpen ? "Nascondi l'elenco" : "Mostra l'elenco dei film") { libOpen.toggle() }.buttonStyle(.link)
+        Card(title: tr("Cartella dei film"), symbol: "folder") {
+            HStack { Text((s.folder as NSString).lastPathComponent).lineLimit(1); Spacer(); Button(tr("Cambia…")) { appDelegate.changeFolder() }.help(tr("La scaletta riparte dai film della nuova cartella")) }
+            Button(libOpen ? tr("Nascondi l'elenco") : tr("Mostra l'elenco dei film")) { libOpen.toggle() }.buttonStyle(.link)
             if libOpen {
-                ForEach(Array(s.lib.enumerated()), id: \.offset) { i, n in HStack { Text(n.noExt).lineLimit(1).font(.callout); Spacer(); IconButton(symbol: "plus.circle", help: "Aggiungi alla scaletta") { engine.send(["a": "addlib", "i": i]) } } }
+                ForEach(Array(s.lib.enumerated()), id: \.offset) { i, n in HStack { Text(n.noExt).lineLimit(1).font(.callout); Spacer(); IconButton(symbol: "plus.circle", help: tr("Aggiungi alla scaletta")) { engine.send(["a": "addlib", "i": i]) } } }
             }
         }
     }
@@ -534,15 +534,15 @@ struct AudioTab: View {
     @ObservedObject var engine: Engine
     var s: Snap { engine.snap }
     var body: some View {
-        Card(title: "Uscita e tracce", symbol: "speaker.wave.2") {
-            HStack { FieldLabel("Uscita")
+        Card(title: tr("Uscita e tracce"), symbol: "speaker.wave.2") {
+            HStack { FieldLabel(tr("Uscita"))
                 Picker("", selection: Binding(get: { s.s("audio-device") }, set: { engine.send(["a": "set", "p": "audio-device", "v": $0]) })) { ForEach(s.adevs, id: \.id) { Text($0.t).tag($0.id) } }.labelsHidden() }
-            HStack { FieldLabel("Traccia")
+            HStack { FieldLabel(tr("Traccia"))
                 Picker("", selection: Binding(get: { s.audio.first { $0.sel }?.id ?? 0 }, set: { engine.send(["a": "aid", "v": $0]) })) { ForEach(s.audio) { Text($0.t).tag($0.id) } }.labelsHidden().disabled(s.audio.isEmpty) }
-            HStack { FieldLabel("Canali")
+            HStack { FieldLabel(tr("Canali"))
                 Picker("", selection: Binding(get: { s.s("audio-channels").isEmpty ? "auto-safe" : s.s("audio-channels") }, set: { engine.send(["a": "set", "p": "audio-channels", "v": $0]) })) {
-                    Text("Originali").tag("auto-safe"); Text("Stereo (mix)").tag("stereo"); Text("Mono").tag("mono"); Text("5.1").tag("5.1") }.labelsHidden() }
-            PropSlider(engine: engine, prop: "audio-delay", label: "Sincronia", range: -5...5, step: 0.05, reset: 0, fmtv: { String(format: "%.2f s", $0) })
+                    Text(tr("Originali")).tag("auto-safe"); Text(tr("Stereo (mix)")).tag("stereo"); Text(tr("Mono")).tag("mono"); Text("5.1").tag("5.1") }.labelsHidden() }
+            PropSlider(engine: engine, prop: "audio-delay", label: tr("Sincronia"), range: -5...5, step: 0.05, reset: 0, fmtv: { String(format: "%.2f s", $0) })
         }
     }
 }
@@ -551,11 +551,11 @@ struct SubsTab: View {
     @ObservedObject var engine: Engine
     var s: Snap { engine.snap }
     var body: some View {
-        Card(title: "Traccia", symbol: "captions.bubble") {
-            HStack { FieldLabel("Traccia")
-                Picker("", selection: Binding(get: { s.sub.first { $0.sel }?.id ?? -1 }, set: { engine.send(["a": "sid", "v": $0 < 0 ? "no" : String($0)]) })) { Text("Nessuno").tag(-1); ForEach(s.sub) { Text($0.t).tag($0.id) } }.labelsHidden() }
-            PropSlider(engine: engine, prop: "sub-delay", label: "Ritardo", range: -10...10, step: 0.1, reset: 0, fmtv: { String(format: "%.1f s", $0) })
-            Toggle("Mostra sottotitoli", isOn: Binding(get: { s.props["sub-visibility"]?.b ?? true }, set: { engine.send(["a": "set", "p": "sub-visibility", "v": $0]) })).toggleStyle(.switch)
+        Card(title: tr("Traccia"), symbol: "captions.bubble") {
+            HStack { FieldLabel(tr("Traccia"))
+                Picker("", selection: Binding(get: { s.sub.first { $0.sel }?.id ?? -1 }, set: { engine.send(["a": "sid", "v": $0 < 0 ? "no" : String($0)]) })) { Text(tr("Nessuno")).tag(-1); ForEach(s.sub) { Text($0.t).tag($0.id) } }.labelsHidden() }
+            PropSlider(engine: engine, prop: "sub-delay", label: tr("Ritardo"), range: -10...10, step: 0.1, reset: 0, fmtv: { String(format: "%.1f s", $0) })
+            Toggle(tr("Mostra sottotitoli"), isOn: Binding(get: { s.props["sub-visibility"]?.b ?? true }, set: { engine.send(["a": "set", "p": "sub-visibility", "v": $0]) })).toggleStyle(.switch)
         }
         SubStyle(engine: engine)
     }
@@ -581,35 +581,35 @@ struct SubStyle: View {
         }.frame(maxWidth: .infinity)
     }
     var body: some View {
-        Card(title: "Stile (salvato come predefinito)", symbol: "textformat") {
+        Card(title: tr("Stile (salvato come predefinito)"), symbol: "textformat") {
             if bitmapTrack {
-                Label("Questa traccia è un’immagine (PGS/DVD): font e colori non si possono cambiare, valgono solo posizione e scala.", systemImage: "info.circle.fill")
+                Label(tr("Questa traccia è un’immagine (PGS/DVD): font e colori non si possono cambiare, valgono solo posizione e scala."), systemImage: "info.circle.fill")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 6) {
-                ForEach([("classic", "Classico"), ("yellow", "Giallo"), ("big", "Grande")], id: \.0) { p in
+                ForEach([("classic", tr("Classico")), ("yellow", tr("Giallo")), ("big", tr("Grande"))], id: \.0) { p in
                     Button(p.1) { engine.send(["a": "setmany", "props": SubStyle.presets[p.0]!]) }.buttonStyle(.bordered).controlSize(.small) }
                 Spacer()
-                Button { confirm("Ripristinare lo stile iniziale dei sottotitoli (font, colori, dimensione, bordo, posizione)?", ok: "Ripristina") { engine.send(["a": "resetsubstyle"]) } } label: { Label("Ripristina", systemImage: "arrow.counterclockwise") }
-                    .buttonStyle(.bordered).controlSize(.small).help("Riporta tutto lo stile dei sottotitoli allo stato iniziale")
+                Button { confirm(tr("Ripristinare lo stile iniziale dei sottotitoli (font, colori, dimensione, bordo, posizione)?"), ok: tr("Ripristina")) { engine.send(["a": "resetsubstyle"]) } } label: { Label(tr("Ripristina"), systemImage: "arrow.counterclockwise") }
+                    .buttonStyle(.bordered).controlSize(.small).help(tr("Riporta tutto lo stile dei sottotitoli allo stato iniziale"))
             }
-            HStack { FieldLabel("Font")
+            HStack { FieldLabel(tr("Font"))
                 Picker("", selection: Binding(get: { s.s("sub-font") }, set: { engine.send(["a": "set", "p": "sub-font", "v": $0]) })) {
                     if !SubStyle.fonts.contains(s.s("sub-font")) { Text(s.s("sub-font")).tag(s.s("sub-font")) }
                     ForEach(SubStyle.fonts, id: \.self) { Text($0).tag($0) } }.labelsHidden()
-                Toggle(isOn: Binding(get: { s.b("sub-bold") }, set: { engine.send(["a": "set", "p": "sub-bold", "v": $0]) })) { Image(systemName: "bold") }.toggleStyle(.button).help("Grassetto")
-                Toggle(isOn: Binding(get: { s.b("sub-italic") }, set: { engine.send(["a": "set", "p": "sub-italic", "v": $0]) })) { Image(systemName: "italic") }.toggleStyle(.button).help("Corsivo") }
-            PropSlider(engine: engine, prop: "sub-font-size", label: "Dimensione", range: 20...120, step: 1, fmtv: { "\(Int($0))" })
+                Toggle(isOn: Binding(get: { s.b("sub-bold") }, set: { engine.send(["a": "set", "p": "sub-bold", "v": $0]) })) { Image(systemName: "bold") }.toggleStyle(.button).help(tr("Grassetto"))
+                Toggle(isOn: Binding(get: { s.b("sub-italic") }, set: { engine.send(["a": "set", "p": "sub-italic", "v": $0]) })) { Image(systemName: "italic") }.toggleStyle(.button).help(tr("Corsivo")) }
+            PropSlider(engine: engine, prop: "sub-font-size", label: tr("Dimensione"), range: 20...120, step: 1, fmtv: { "\(Int($0))" })
             HStack(alignment: .top, spacing: 0) {
-                swatch("Testo", "sub-color", alpha: false)
-                swatch("Bordo", "sub-border-color", alpha: false)
-                swatch("Sfondo", "sub-back-color", alpha: true)
+                swatch(tr("Testo"), "sub-color", alpha: false)
+                swatch(tr("Bordo"), "sub-border-color", alpha: false)
+                swatch(tr("Sfondo"), "sub-back-color", alpha: true)
             }.padding(.vertical, 2)
-            PropSlider(engine: engine, prop: "sub-border-size", label: "Bordo", range: 0...10, step: 0.25)
-            PropSlider(engine: engine, prop: "sub-shadow-offset", label: "Ombra", range: 0...10, step: 0.25)
-            PropSlider(engine: engine, prop: "sub-pos", label: "Posizione", range: 0...100, step: 1, fmtv: { "\(Int($0))" })
-            PropSlider(engine: engine, prop: "sub-scale", label: "Scala", range: 0.3...3, step: 0.05, reset: 1)
-            Toggle("Usa il mio stile anche sui sottotitoli già stilizzati (ASS)", isOn: Binding(get: { s.s("sub-ass-override") != "scale" && s.s("sub-ass-override") != "no" }, set: { engine.send(["a": "set", "p": "sub-ass-override", "v": $0 ? "force" : "scale"]) })).toggleStyle(.switch).font(.callout)
+            PropSlider(engine: engine, prop: "sub-border-size", label: tr("Bordo"), range: 0...10, step: 0.25)
+            PropSlider(engine: engine, prop: "sub-shadow-offset", label: tr("Ombra"), range: 0...10, step: 0.25)
+            PropSlider(engine: engine, prop: "sub-pos", label: tr("Posizione"), range: 0...100, step: 1, fmtv: { "\(Int($0))" })
+            PropSlider(engine: engine, prop: "sub-scale", label: tr("Scala"), range: 0.3...3, step: 0.05, reset: 1)
+            Toggle(tr("Usa il mio stile anche sui sottotitoli già stilizzati (ASS)"), isOn: Binding(get: { s.s("sub-ass-override") != "scale" && s.s("sub-ass-override") != "no" }, set: { engine.send(["a": "set", "p": "sub-ass-override", "v": $0 ? "force" : "scale"]) })).toggleStyle(.switch).font(.callout)
         }
     }
 }
@@ -618,18 +618,18 @@ struct ImageTab: View {
     @ObservedObject var engine: Engine
     var s: Snap { engine.snap }
     var body: some View {
-        Card(title: "Immagine", symbol: "camera.filters") {
-            ForEach([("brightness", "Luminosità", -100.0...100.0, 1.0), ("contrast", "Contrasto", -100.0...100.0, 1.0), ("saturation", "Saturazione", -100.0...100.0, 1.0), ("gamma", "Gamma", -100.0...100.0, 1.0), ("hue", "Tonalità", -100.0...100.0, 1.0)], id: \.0) { p in
+        Card(title: tr("Immagine"), symbol: "camera.filters") {
+            ForEach([("brightness", tr("Luminosità"), -100.0...100.0, 1.0), ("contrast", tr("Contrasto"), -100.0...100.0, 1.0), ("saturation", tr("Saturazione"), -100.0...100.0, 1.0), ("gamma", "Gamma", -100.0...100.0, 1.0), ("hue", tr("Tonalità"), -100.0...100.0, 1.0)], id: \.0) { p in
                 PropSlider(engine: engine, prop: p.0, label: p.1, range: p.2, step: p.3, reset: 0, fmtv: { String(Int($0)) }) }
         }
-        Card(title: "Inquadratura", symbol: "crop") {
-            HStack { FieldLabel("Proporzioni")
+        Card(title: tr("Inquadratura"), symbol: "crop") {
+            HStack { FieldLabel(tr("Proporzioni"))
                 Picker("", selection: Binding(get: { aspectTag }, set: { engine.send(["a": "set", "p": "video-aspect-override", "v": $0]) })) {
-                    ForEach([("-1", "Originali"), ("16:9", "16:9"), ("4:3", "4:3"), ("1.85:1", "1.85:1"), ("2.35:1", "2.35:1"), ("2.39:1", "2.39:1"), ("1:1", "1:1")], id: \.0) { Text($0.1).tag($0.0) } }.labelsHidden() }
-            ForEach([("video-zoom", "Zoom", -1.0...2.0, 0.01), ("video-pan-x", "Sposta ←→", -1.0...1.0, 0.01), ("video-pan-y", "Sposta ↑↓", -1.0...1.0, 0.01), ("panscan", "Riempi (taglia)", 0.0...1.0, 0.05)], id: \.0) { p in
+                    ForEach([("-1", tr("Originali")), ("16:9", "16:9"), ("4:3", "4:3"), ("1.85:1", "1.85:1"), ("2.35:1", "2.35:1"), ("2.39:1", "2.39:1"), ("1:1", "1:1")], id: \.0) { Text($0.1).tag($0.0) } }.labelsHidden() }
+            ForEach([("video-zoom", tr("Zoom"), -1.0...2.0, 0.01), ("video-pan-x", tr("Sposta ←→"), -1.0...1.0, 0.01), ("video-pan-y", tr("Sposta ↑↓"), -1.0...1.0, 0.01), ("panscan", tr("Riempi (taglia)"), 0.0...1.0, 0.05)], id: \.0) { p in
                 PropSlider(engine: engine, prop: p.0, label: p.1, range: p.2, step: p.3, reset: 0) }
-            HStack { Toggle("Deinterlaccia", isOn: Binding(get: { s.b("deinterlace") }, set: { engine.send(["a": "set", "p": "deinterlace", "v": $0]) })).toggleStyle(.switch); Spacer()
-                Button("Ripristina") { engine.send(["a": "resetvideo"]) }.buttonStyle(.bordered).controlSize(.small) }
+            HStack { Toggle(tr("Deinterlaccia"), isOn: Binding(get: { s.b("deinterlace") }, set: { engine.send(["a": "set", "p": "deinterlace", "v": $0]) })).toggleStyle(.switch); Spacer()
+                Button(tr("Ripristina")) { engine.send(["a": "resetvideo"]) }.buttonStyle(.bordered).controlSize(.small) }
         }
     }
     var aspectTag: String {
@@ -644,23 +644,23 @@ struct MoreTab: View {
     var s: Snap { engine.snap }
     @State private var msg = ""
     var body: some View {
-        Card(title: "Capitoli e fotogramma", symbol: "list.number") {
-            HStack { FieldLabel("Capitolo")
+        Card(title: tr("Capitoli e fotogramma"), symbol: "list.number") {
+            HStack { FieldLabel(tr("Capitolo"))
                 Picker("", selection: Binding(get: { s.chapter ?? 0 }, set: { engine.send(["a": "chapter", "v": $0]) })) {
                     ForEach(Array(s.chapters.enumerated()), id: \.offset) { i, c in Text("\(c.t) (\(fmt(c.s)))").tag(i) } }.labelsHidden().disabled(s.chapters.isEmpty) }
             HStack(spacing: 8) {
-                Button { engine.send(["a": "abloop"]) } label: { Label(s.ab[0] != nil ? "Loop A-B attivo" : "Loop A-B", systemImage: "arrow.left.and.right") }.buttonStyle(.bordered).controlSize(.small)
-                Button { engine.send(["a": "frameback"]) } label: { Image(systemName: "backward.frame") }.help("Un fotogramma indietro")
-                Button { engine.send(["a": "frame"]) } label: { Image(systemName: "forward.frame") }.help("Un fotogramma avanti")
+                Button { engine.send(["a": "abloop"]) } label: { Label(s.ab[0] != nil ? tr("Loop A-B attivo") : tr("Loop A-B"), systemImage: "arrow.left.and.right") }.buttonStyle(.bordered).controlSize(.small)
+                Button { engine.send(["a": "frameback"]) } label: { Image(systemName: "backward.frame") }.help(tr("Un fotogramma indietro"))
+                Button { engine.send(["a": "frame"]) } label: { Image(systemName: "forward.frame") }.help(tr("Un fotogramma avanti"))
             }
         }
         RemoteCard()
-        Card(title: "Messaggio sullo schermo della sala", symbol: "text.bubble") {
-            HStack { TextField("Es. Si prega di spegnere i cellulari", text: $msg).textFieldStyle(.roundedBorder); Button("Mostra 8″") { engine.send(["a": "text", "v": msg, "ms": 8000]) } }
+        Card(title: tr("Messaggio sullo schermo della sala"), symbol: "text.bubble") {
+            HStack { TextField(tr("Es. Si prega di spegnere i cellulari"), text: $msg).textFieldStyle(.roundedBorder); Button(tr("Mostra 8″")) { engine.send(["a": "text", "v": msg, "ms": 8000]) } }
         }
-        Card(title: "Anteprima e informazioni", symbol: "info.circle") {
-            Toggle("Anteprima del proiettore attiva", isOn: Binding(get: { UserDefaults.standard.object(forKey: "preview") as? Bool ?? true }, set: { UserDefaults.standard.set($0, forKey: "preview") })).toggleStyle(.switch)
-            Text(s.playing ? "\(s.info.res ?? "") · \(s.info.fps.map { String(format: "%.3f fps", $0) } ?? "")\n\(s.info.vcodec ?? "")\naudio \(s.info.acodec ?? "")\nfotogrammi persi: \(s.info.dropped ?? 0)" : "—")
+        Card(title: tr("Anteprima e informazioni"), symbol: "info.circle") {
+            Toggle(tr("Anteprima del proiettore attiva"), isOn: Binding(get: { UserDefaults.standard.object(forKey: "preview") as? Bool ?? true }, set: { UserDefaults.standard.set($0, forKey: "preview") })).toggleStyle(.switch)
+            Text(s.playing ? trf("%@ · %@\n%@\naudio %@\nfotogrammi persi: %d", s.info.res ?? "", s.info.fps.map { String(format: "%.3f fps", $0) } ?? "", s.info.vcodec ?? "", s.info.acodec ?? "", s.info.dropped ?? 0) : "—")
                 .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
         }
     }

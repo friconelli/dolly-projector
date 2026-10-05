@@ -17,7 +17,7 @@ final class Engine: ObservableObject {
     private var caff: Process?
     private var tickCount = 0
 
-    private var items: [Item] = [], name = "Scena", defpre = 0.0, defpost = 0.0, auto = true, loop = false, defsub = "file"   // defsub: sottotitoli di tutta la scena
+    private var items: [Item] = [], name = tr("Scena"), defpre = 0.0, defpost = 0.0, auto = true, loop = false, defsub = "file"   // defsub: sottotitoli di tutta la scena
     private var prefs: [String: Any] = [:], resume: [String: Any]?
     private var mode = "idle", idx = -1, sel = 0, next = -1, until = 0.0, label = ""
     private var pos = 0.0, dur = 0.0, loadedAt = 0.0, shown = 0, retries = 0, fails = 0, restarts = 0, lastSave = 0.0
@@ -56,7 +56,7 @@ final class Engine: ObservableObject {
     private func save() { writeJSON(dump(), to: cfile) }
     private func loadCurrent() {
         let d = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: cfile)))) as? [String: Any] ?? [:]
-        name = asString(d["name"]) ?? "Scena"; defpre = asDouble(d["defpre"]) ?? 0; defpost = asDouble(d["defpost"]) ?? 0
+        name = asString(d["name"]) ?? tr("Scena"); defpre = asDouble(d["defpre"]) ?? 0; defpost = asDouble(d["defpost"]) ?? 0
         auto = asBool(d["auto"]) ?? true; loop = asBool(d["loop"]) ?? false; prefs = (d["prefs"] as? [String: Any] ?? [:]).filter { $0.key != "loop-file" && $0.key != "speed" }
         defsub = ["file", "none", "forced", "full"].contains(asString(d["defsub"]) ?? "") ? asString(d["defsub"])! : "file"
         resume = d["resume"] as? [String: Any]
@@ -111,7 +111,7 @@ final class Engine: ObservableObject {
             _ = try? mpv.ipc([["stop"]]); mode = "wait"; idx = i; sel = i; until = nowT() + it.secs; shown = 0; err = nil; return
         }
         if !FileManager.default.fileExists(atPath: it.path) {
-            err = "file mancante: \(it.title)"; log(err!); advance(i); return
+            err = trf("file mancante: %@", it.title); log(err!); advance(i); return
         }
         // lingue e livello di questo film (le opzioni valgono per il file che sta per essere aperto)
         let sm = subMode(it)
@@ -142,7 +142,7 @@ final class Engine: ObservableObject {
         sel = n
         if !auto { mode = "idle"; resume = nil; save(); return }
         let secs = post(i) + pre(n)
-        gap(n, secs, secs > 0 ? "Nero tra i film" : "")
+        gap(n, secs, secs > 0 ? tr("Nero tra i film") : "")
     }
     private func tickLoop() {
         do { try tick() } catch { log("errore tick:", error) }
@@ -150,7 +150,7 @@ final class Engine: ObservableObject {
     }
     private func tick() throws {
         if quitting { return }
-        if !mpv.alive { respawn("processo terminato"); return }
+        if !mpv.alive { respawn(tr("processo terminato")); return }
         let now = nowT()
         if mode == "gap" && now >= until { load(next) }
         else if mode == "wait" {
@@ -163,13 +163,13 @@ final class Engine: ObservableObject {
         } else if mode == "playing" {
             let r: [String: Any]
             do { r = try mpv.get(["idle-active", "time-pos", "duration"]); fails = 0 }
-            catch { fails += 1; log("mpv non risponde", fails, error); if fails >= 3 { respawn("non risponde") }; return }
+            catch { fails += 1; log(tr("mpv non risponde"), fails, error); if fails >= 3 { respawn(tr("non risponde")) }; return }
             if asBool(r["idle-active"]) == true {
                 if now - loadedAt < 2 { return }   // caricamento in corso
                 if dur > 0 && pos < dur - 5 && retries < 2 {   // fine anomala: riprova dal punto in cui era
-                    retries += 1; let msg = "interrotto a \(Int(pos))s, riprendo"; log(msg); load(idx, start: max(0, pos - 1)); err = msg
+                    retries += 1; let msg = trf("interrotto a %ds, riprendo", Int(pos)); log(msg); load(idx, start: max(0, pos - 1)); err = msg
                 } else {
-                    if dur == 0 { err = "\(items[idx].title): non riproducibile, passo oltre" }
+                    if dur == 0 { err = trf("%@: non riproducibile, passo oltre", items[idx].title) }
                     advance(idx)
                 }
             } else {
@@ -235,26 +235,26 @@ final class Engine: ObservableObject {
 
     // MARK: comandi
     private func base() -> Int { (mode == "playing" || mode == "wait") ? idx : sel }
-    private func startItem(_ i: Int) { if items.indices.contains(i) { gap(i, pre(i), pre(i) > 0 ? "Nero prima del film" : "") } }
+    private func startItem(_ i: Int) { if items.indices.contains(i) { gap(i, pre(i), pre(i) > 0 ? tr("Nero prima del film") : "") } }
     private func num(_ d: [String: Any], _ k: String) throws -> Double {
-        guard let v = asDouble(d[k]) else { throw DollyError("valore non valido per \(k)") }
+        guard let v = asDouble(d[k]) else { throw DollyError(trf("valore non valido per %@", k)) }
         return v
     }
     private func optNum(_ v: Any?) throws -> Double? {
         if v == nil || v is NSNull || (v as? String) == "" { return nil }
-        guard let x = asDouble(v) else { throw DollyError("valore non valido") }
+        guard let x = asDouble(v) else { throw DollyError(tr("valore non valido")) }
         return max(0, x)
     }
     private func setProp(_ p: String, _ v: Any?) throws {
-        guard let k = PROPS[p] else { throw DollyError("proprietà non ammessa: \(p)") }
+        guard let k = PROPS[p] else { throw DollyError(trf("proprietà non ammessa: %@", p)) }
         let val: Any
         switch k.kind {
         case "b": val = asBool(v) ?? false
-        case "f": guard let x = asDouble(v) else { throw DollyError("numero non valido") }; val = max(k.lo, min(k.hi, x))
+        case "f": guard let x = asDouble(v) else { throw DollyError(tr("numero non valido")) }; val = max(k.lo, min(k.hi, x))
         default: val = String((asString(v) ?? "").prefix(100))
         }
-        if p.hasSuffix("color"), (val as! String).range(of: "^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$", options: .regularExpression) == nil { throw DollyError("colore non valido: \(val)") }
-        if p == "sub-ass-override", !["no", "yes", "scale", "force", "strip"].contains(val as! String) { throw DollyError("valore non valido: \(val)") }
+        if p.hasSuffix("color"), (val as! String).range(of: "^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$", options: .regularExpression) == nil { throw DollyError(trf("colore non valido: %@", "\(val)")) }
+        if p == "sub-ass-override", !["no", "yes", "scale", "force", "strip"].contains(val as! String) { throw DollyError(trf("valore non valido: %@", "\(val)")) }
         if p == "loop-file" { loopFile = (val as? String) != "no"; try mpv.ipc([["set_property", p, val]]); return }
         prefs[p] = val; try mpv.ipc([["set_property", p, val]])
     }
@@ -288,7 +288,7 @@ final class Engine: ObservableObject {
         items = paths.flatMap { videosIn($0) }.map { Item(path: $0) }
     }
     private func loadList(_ n: String) throws {
-        guard let d = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: plPath(n))))) as? [String: Any] else { throw DollyError("scaletta non trovata") }
+        guard let d = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: plPath(n))))) as? [String: Any] else { throw DollyError(tr("scaletta non trovata")) }
         if mode != "idle" { stopAll() }
         name = asString(d["name"]) ?? n; items = (d["items"] as? [[String: Any]] ?? []).map { Item(dict: $0) }
         defpre = asDouble(d["defpre"]) ?? 0; defpost = asDouble(d["defpost"]) ?? 0; auto = asBool(d["auto"]) ?? true; loop = asBool(d["loop"]) ?? false
@@ -296,7 +296,7 @@ final class Engine: ObservableObject {
     }
 
     func act(_ d: [String: Any]) throws {
-        guard let a = d["a"] as? String else { throw DollyError("comando mancante") }
+        guard let a = d["a"] as? String else { throw DollyError(tr("comando mancante")) }
         switch a {
         case "play": startItem(Int(try num(d, "i")))
         case "toggle":   // play/pausa: se non sta suonando niente parte l'elemento selezionato
@@ -340,17 +340,17 @@ final class Engine: ObservableObject {
                 if idx >= 0 { idx = shift(idx) }; if next >= 0 { next = shift(next) }; sel = shift(sel)
             } else { items += new }
         case "addblack": items.append(Item(path: "", kind: "nero", secs: max(0.5, asDouble(d["secs"]) ?? 5)))
-        case "addpause": items.append(Item(path: "", kind: "pausa", secs: max(1, asDouble(d["secs"]) ?? 600), text: String((asString(d["text"]) ?? "Intervallo").prefix(100))))
+        case "addpause": items.append(Item(path: "", kind: "pausa", secs: max(1, asDouble(d["secs"]) ?? 600), text: String((asString(d["text"]) ?? tr("Intervallo")).prefix(100))))
         case "addlib":
             let fs = videosIn(folder)
-            if let i = asInt(d["i"]) { guard fs.indices.contains(i) else { throw DollyError("indice fuori range") }; items.append(Item(path: fs[i])) }
+            if let i = asInt(d["i"]) { guard fs.indices.contains(i) else { throw DollyError(tr("indice fuori range")) }; items.append(Item(path: fs[i])) }
             else { items += fs.map { Item(path: $0) } }
         case "remove": removeItem(asInt(d["i"]) ?? -1)
         case "move": moveItem(asInt(d["i"]) ?? -1, asInt(d["d"]) ?? 0)
         case "reorder": reorderItem(asInt(d["from"]) ?? -1, asInt(d["to"]) ?? -1)
         case "clear": if mode != "idle" { stopAll() }; items = []; sel = 0; idx = -1
         case "setitem":
-            guard let i = asInt(d["i"]), items.indices.contains(i) else { throw DollyError("indice fuori range") }
+            guard let i = asInt(d["i"]), items.indices.contains(i) else { throw DollyError(tr("indice fuori range")) }
             if d.keys.contains("pre") { items[i].pre = try optNum(d["pre"]) }
             if d.keys.contains("post") { items[i].post = try optNum(d["post"]) }
             if d.keys.contains("vol") { items[i].vol = try optNum(d["vol"]) }
@@ -388,7 +388,7 @@ final class Engine: ObservableObject {
         let extra = ["pause", "time-pos", "duration", "track-list", "chapter-list", "chapter", "ab-loop-a", "ab-loop-b", "video-params", "container-fps", "video-codec",
                      "audio-codec-name", "frame-drop-count", "decoder-frame-drop-count", "path", "audio-device-list"]
         let r: [String: Any]
-        do { r = try mpv.get(extra + READ_PROPS) } catch { st["ok"] = false; st["err"] = "mpv non risponde: \(error)"; return st }
+        do { r = try mpv.get(extra + READ_PROPS) } catch { st["ok"] = false; st["err"] = trf("mpv non risponde: %@", "\(error)"); return st }
         let tl = r["track-list"] as? [[String: Any]] ?? []
         func tr(_ type: String) -> [[String: Any]] {
             tl.filter { $0["type"] as? String == type }.map { x in
@@ -396,11 +396,11 @@ final class Engine: ObservableObject {
                 for k in ["lang", "title", "codec"] { if let s = asString(x[k]), !s.isEmpty { parts.append(s) } }
                 if let n = asInt(x["demux-channel-count"]), n > 0 { parts.append("\(n)ch") }
                 let id = asInt(x["id"]) ?? 0
-                return ["id": id, "t": parts.isEmpty ? "traccia \(id)" : parts.joined(separator: " · "), "sel": asBool(x["selected"]) ?? false]
+                return ["id": id, "t": parts.isEmpty ? trf("traccia %d", id) : parts.joined(separator: " · "), "sel": asBool(x["selected"]) ?? false]
             }
         }
         let vp = r["video-params"] as? [String: Any] ?? [:]
-        let chs = (r["chapter-list"] as? [[String: Any]] ?? []).enumerated().map { (i, c) in ["t": asString(c["title"]) ?? "Capitolo \(i + 1)", "s": asDouble(c["time"]) ?? 0] as [String: Any] }
+        let chs = (r["chapter-list"] as? [[String: Any]] ?? []).enumerated().map { (i, c) in ["t": asString(c["title"]) ?? trf("Capitolo %d", i + 1), "s": asDouble(c["time"]) ?? 0] as [String: Any] }
         st["playing"] = r["path"] != nil; st["pause"] = asBool(r["pause"]) ?? false; st["time"] = asDouble(r["time-pos"]) ?? 0.0; st["dur"] = asDouble(r["duration"]) ?? 0.0
         st["audio"] = tr("audio"); st["sub"] = tr("sub"); st["video"] = tr("video"); st["chapters"] = chs; st["chapter"] = r["chapter"] ?? NSNull()
         st["ab"] = [asDouble(r["ab-loop-a"]) as Any? ?? NSNull(), asDouble(r["ab-loop-b"]) as Any? ?? NSNull()]   // "no" quando non impostato
@@ -440,13 +440,13 @@ final class Engine: ObservableObject {
     func send(_ d: [String: Any], done: ((String?) -> Void)? = nil) {
         q.async {
             var e: String?
-            do { try self.act(d) } catch { e = "\(error)"; log("errore comando", d, error) }
+            do { try self.act(d) } catch { e = "\(error)"; log(tr("errore comando"), d, error) }
             self.schedulePublish()
             if let done = done { DispatchQueue.main.async { done(e) } }
         }
     }
     func actSync(_ d: [String: Any]) -> String? {
-        q.sync { do { try act(d); return nil } catch { log("errore comando", d, error); return "\(error)" } }
+        q.sync { do { try act(d); return nil } catch { log(tr("errore comando"), d, error); return "\(error)" } }
     }
     func stateSync() -> Data { q.sync { stateData() } }
     func previewSync() -> Data? { q.sync { preview() } }
