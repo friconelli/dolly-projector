@@ -191,8 +191,41 @@ struct HeaderBar: View {
 }
 
 // MARK: scaletta
+/// File trascinati dal Finder: ritorna i percorsi (file o cartelle) dopo averli letti da tutti gli NSItemProvider.
+func fileURLs(from providers: [NSItemProvider], done: @escaping ([String]) -> Void) {
+    var paths: [String] = []; let g = DispatchGroup(); let lock = NSLock()
+    for p in providers where p.canLoadObject(ofClass: URL.self) {
+        g.enter(); _ = p.loadObject(ofClass: URL.self) { u, _ in if let u = u, u.isFileURL { lock.lock(); paths.append(u.path); lock.unlock() }; g.leave() }
+    }
+    g.notify(queue: .main) { done(paths.sorted()) }   // in ordine di nome, come nelle cartelle
+}
+
+let rowDragPrefix = "dolly-row:"
+
+/// Rilascio su una riga della scaletta: una riga trascinata dalla scaletta stessa la sposta lì; file o cartelle dal Finder vengono inseriti prima di quella riga.
+struct RowDrop: DropDelegate {
+    let engine: Engine; let index: Int; @Binding var target: Int?
+    func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: [.fileURL, .plainText]) }
+    func dropEntered(info: DropInfo) { target = index }
+    func dropExited(info: DropInfo) { if target == index { target = nil } }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: info.hasItemsConforming(to: [.fileURL]) ? .copy : .move) }
+    func performDrop(info: DropInfo) -> Bool {
+        target = nil
+        let files = info.itemProviders(for: [.fileURL])
+        if !files.isEmpty { fileURLs(from: files) { engine.send(["a": "add", "paths": $0, "at": index]) }; return true }
+        guard let p = info.itemProviders(for: [.plainText]).first else { return false }
+        _ = p.loadObject(ofClass: NSString.self) { s, _ in
+            guard let s = s as? String, s.hasPrefix(rowDragPrefix), let from = Int(s.dropFirst(rowDragPrefix.count)) else { return }
+            DispatchQueue.main.async { engine.send(["a": "reorder", "from": from, "to": min(index, max(0, engine.snap.items.count - 1))]) }
+        }
+        return true
+    }
+}
+
 struct ScalettaPanel: View {
     @ObservedObject var engine: Engine
+    @State private var dropTarget = false
+    @State private var dropRow: Int?
     var s: Snap { engine.snap }
     @State private var nameText = ""; @FocusState private var nameFocus: Bool
     @State private var gear: Int?
@@ -215,15 +248,20 @@ struct ScalettaPanel: View {
             Divider()
             if s.items.isEmpty {
                 VStack(spacing: 8) { Image(systemName: "film.stack").font(.system(size: 30)).foregroundStyle(.tertiary); Text("Scaletta vuota").foregroundStyle(.secondary)
-                    Text("Aggiungi film con il pulsante + qui sotto.").font(.caption).foregroundStyle(.tertiary) }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Text("Aggiungi film con il pulsante + qui sotto, oppure trascinali qui dal Finder.").font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center) }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.accentColor.opacity(dropTarget ? 0.8 : 0), style: StrokeStyle(lineWidth: 2, dash: [6])).padding(8))
+                    .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in fileURLs(from: providers) { engine.send(["a": "add", "paths": $0]) }; return true }
             } else {
                 List {
                     ForEach(Array(s.items.enumerated()), id: \.offset) { i, it in
                         ItemRow(engine: engine, i: i, it: it, gear: $gear).listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)).listRowSeparator(.hidden)
-                    }.onMove { from, to in
-                        guard let f = from.first else { return }
-                        engine.send(["a": "reorder", "from": f, "to": to > f ? to - 1 : to])
+                            .overlay(alignment: .top) { if dropRow == i { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6).offset(y: -2) } }   // dove cadrà
+                            .onDrag { NSItemProvider(object: "\(rowDragPrefix)\(i)" as NSString) }   // trascina la riga per cambiare l'ordine
+                            .onDrop(of: [.fileURL, .plainText], delegate: RowDrop(engine: engine, index: i, target: $dropRow))
                     }
+                    Color.clear.frame(height: 44).listRowSeparator(.hidden)   // zona in fondo: rilascia qui per mettere in coda
+                        .overlay(alignment: .top) { if dropRow == s.items.count { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6) } }
+                        .onDrop(of: [.fileURL, .plainText], delegate: RowDrop(engine: engine, index: s.items.count, target: $dropRow))
                 }.listStyle(.plain).scrollContentBackground(.hidden)
             }
             Divider()

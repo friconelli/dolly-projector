@@ -524,6 +524,11 @@ def t_remote():
         for _ in range(6): call("/api/login", {"pin": "0000x"})
         c, _ = call("/api/login", {"pin": pin}); check(c == 429, "dopo troppi tentativi sbagliati il PIN giusto viene bloccato per un po'")
         c, _ = call("/api/state", tok=tok); check(c == 200, "ma chi è già collegato continua a funzionare")
+        s.stop(); s.start(); time.sleep(.8)
+        pin2 = json.load(open(os.path.join(s.home, "remote.json")))["pin"]
+        check(pin2 != pin, f"a ogni avvio il PIN è nuovo ({pin} -> {pin2})")
+        c, _ = call("/api/state", tok=tok); check(c == 401, "dopo il riavvio i telefoni già collegati devono rifare l'accesso")
+        c, b = call("/api/login", {"pin": pin2}); check(c == 200 and json.loads(b).get("token"), "con il PIN nuovo l'accesso funziona")
     finally: s.stop()
 
 def t_update():
@@ -558,6 +563,25 @@ def t_update():
         z2, sha2 = make("9.9.9", bid="evil.app.xyz"); o = run({"version": "9.9.9", "url": f"http://127.0.0.1:{port}/{os.path.basename(z2)}", "sha256": sha2}); check("non contiene" in o.get("error", ""), "app con un altro identificativo: rifiutata")
         o = run({"version": "9.9.9", "url": "http://example.com/x.zip", "sha256": sha}, dl=False); check("non valida" in o.get("error", ""), "un indirizzo http non locale è rifiutato")
     finally: h.shutdown()
+
+def t_trascina_file():
+    """Trascinamento di file dal Finder: inserimento tra due righe, in fondo, cartelle, formati non ammessi; il film in corso non cambia."""
+    s = Srv(MEDIA, files=["01_a.mp4", "04_d.mp4"])
+    try:
+        s.act(a="play", i=1); s.wait(lambda x: x["mode"] == "playing" and x["idx"] == 1 and x["time"] > .3, 8)
+        s.act(a="add", paths=[os.path.join(MEDIA, "05_e.mkv")], at=0); st = s.state()
+        check([i["name"] for i in st["items"]] == ["05_e.mkv", "01_a.mp4", "04_d.mp4"], f"inserito all'inizio ({[i['name'] for i in st['items']]})")
+        check(st["idx"] == 2 and st["mode"] == "playing", f"il film in corso resta lo stesso: idx scala a {st['idx']}")
+        s.act(a="add", paths=[os.path.join(MEDIA, "02_b.mkv")], at=2); st = s.state()
+        check([i["name"] for i in st["items"]] == ["05_e.mkv", "01_a.mp4", "02_b.mkv", "04_d.mp4"] and st["idx"] == 3, "inserito in mezzo: chi segue scala")
+        s.act(a="add", paths=[os.path.join(MEDIA, "03_hevc10.mkv")]); check(s.state()["items"][-1]["name"] == "03_hevc10.mkv", "senza posizione va in fondo")
+        n = len(s.state()["items"]); s.act(a="add", paths=[os.path.join(MEDIA, "eng.srt"), os.path.join(MEDIA, "ch.txt")], at=1)
+        check(len(s.state()["items"]) == n, "file che non sono mp4/avi/mkv vengono ignorati")
+        s.act(a="add", paths=[os.path.join(MEDIA, "01_a.mp4")], at=99); check(s.state()["items"][-1]["name"] == "01_a.mp4", "posizione fuori range: in fondo")
+        s.act(a="clear"); s.act(a="add", paths=[MEDIA], at=0); names = [i["name"] for i in s.state()["items"]]
+        check(len(names) >= 6 and all(x.rsplit(".", 1)[-1] in ("mp4", "mkv", "avi") for x in names), f"una cartella aggiunge i suoi film ({len(names)})")
+        check(s.state()["restarts"] == 0, "nessun riavvio")
+    finally: s.stop()
 
 def t_orphan():
     """Se lo script viene ucciso di forza, al riavvio il vecchio mpv rimasto sullo schermo viene chiuso."""
@@ -613,7 +637,7 @@ def t_soak(minutes):
         if len(samples) > 3: check(samples[-1][0] < samples[1][0] * 1.6 + 30 and samples[-1][1] < samples[1][1] * 1.6 + 100, f"memoria stabile python/mpv MB: {samples[1]} → {samples[-1]}")
     finally: s.stop()
 
-TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "update": t_update,
+TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "trascina_file": t_trascina_file, "update": t_update,
          "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film}
 
 def main():

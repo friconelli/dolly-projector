@@ -23,12 +23,13 @@ final class RemoteControl: ObservableObject {
 
     private init() {
         if let d = try? Data(contentsOf: URL(fileURLWithPath: cfile)), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] {
-            enabled = o["enabled"] as? Bool ?? false; pin = o["pin"] as? String ?? ""; tokens = o["tokens"] as? [String] ?? []
+            enabled = o["enabled"] as? Bool ?? false; pin = o["pin"] as? String ?? ""
         }
-        if pin.count != 4 { pin = RemoteControl.newPin() }
+        pin = RemoteControl.newPin(not: pin); tokens = []   // PIN nuovo a ogni avvio dell'app: i telefoni devono rifare l'accesso
+        save()
         if enabled { start() }
     }
-    private static func newPin() -> String { String(format: "%04d", Int.random(in: 0...9999)) }
+    private static func newPin(not old: String = "") -> String { var p: String; repeat { p = String(format: "%04d", Int.random(in: 0...9999)) } while p == old; return p }
     private func save() {
         let o: [String: Any] = ["enabled": enabled, "pin": pin, "tokens": tokens]
         try? FileManager.default.createDirectory(atPath: Engine.homePath, withIntermediateDirectories: true)
@@ -36,12 +37,12 @@ final class RemoteControl: ObservableObject {
     }
 
     func setEnabled(_ on: Bool) {
-        if on { start() } else { stop() }
+        if on { if !enabled { regeneratePin() }; start() } else { stop() }   // PIN nuovo a ogni attivazione
         enabled = on && problem == nil; if on && problem != nil { stop() }
         save()
     }
     /// Nuovo PIN: i telefoni già collegati devono rifare l'accesso.
-    func regeneratePin() { lock.lock(); tokens = []; lock.unlock(); pin = RemoteControl.newPin(); save() }
+    func regeneratePin() { lock.lock(); tokens = []; lock.unlock(); pin = RemoteControl.newPin(not: pin); save() }
 
     // MARK: server
     private func start() {

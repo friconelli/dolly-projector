@@ -332,7 +332,13 @@ final class Engine: ObservableObject {
             if let v = asBool(d["auto"]) { auto = v }
             if let v = asBool(d["loop"]) { loop = v }
             if let v = asString(d["defsub"]), ["file", "none", "forced", "full"].contains(v) { defsub = v; if mode == "playing" { langPending = true; langTries = 0 } }   // vale subito sul film in corso
-        case "add": items += (d["paths"] as? [String] ?? []).flatMap { videosIn(($0 as NSString).expandingTildeInPath) }.map { Item(path: $0) }
+        case "add":   // "at": posizione di inserimento (trascinamento dal Finder tra due righe); senza, in fondo
+            let new = (d["paths"] as? [String] ?? []).flatMap { videosIn(($0 as NSString).expandingTildeInPath) }.map { Item(path: $0) }
+            if let at = asInt(d["at"]), (0...items.count).contains(at), !new.isEmpty {
+                items.insert(contentsOf: new, at: at)
+                func shift(_ k: Int) -> Int { k >= at ? k + new.count : k }   // chi sta dopo il punto di inserimento scala in avanti
+                if idx >= 0 { idx = shift(idx) }; if next >= 0 { next = shift(next) }; sel = shift(sel)
+            } else { items += new }
         case "addblack": items.append(Item(path: "", kind: "nero", secs: max(0.5, asDouble(d["secs"]) ?? 5)))
         case "addpause": items.append(Item(path: "", kind: "pausa", secs: max(1, asDouble(d["secs"]) ?? 600), text: String((asString(d["text"]) ?? "Intervallo").prefix(100))))
         case "addlib":
