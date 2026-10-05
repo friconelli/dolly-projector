@@ -399,6 +399,32 @@ struct ItemRow: View {
     func play() { if s.mode == "idle" { engine.send(["a": "play", "i": i]) } else { confirm(tr("Cambiare? Quello in corso si interrompe.")) { engine.send(["a": "play", "i": i]) } } }
 }
 
+/// Sfondo (immagine o video in loop) e preset di un intervallo.
+struct BgControls: View {
+    @ObservedObject var engine: Engine
+    let i: Int; let it: ItemState
+    @State private var presetName = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack { FieldLabel(tr("Sfondo"))
+                Text((it.bg ?? "").isEmpty ? tr("nero") : ((it.bg ?? "") as NSString).lastPathComponent).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                Spacer()
+                Button(tr("Scegli…")) { if let p = pickFiles(types: ["jpg", "jpeg", "png", "heic", "gif", "mp4", "mov", "mkv", "m4v"], multiple: false, prompt: tr("Immagine o video per lo sfondo dell'intervallo")).first { engine.send(["a": "setitem", "i": i, "bg": p]) } }.controlSize(.small)
+                if !(it.bg ?? "").isEmpty { Button(tr("Togli")) { engine.send(["a": "setitem", "i": i, "bg": ""]) }.controlSize(.small) } }
+            if !(it.bg ?? "").isEmpty { Toggle(tr("Audio dello sfondo"), isOn: Binding(get: { it.bgaudio ?? false }, set: { engine.send(["a": "setitem", "i": i, "bgaudio": $0]) })).toggleStyle(.switch).controlSize(.small) }
+            HStack { FieldLabel(tr("Preset"))
+                Menu(tr("Applica…")) {
+                    ForEach(engine.snap.presets, id: \.name) { p in Button(p.name) { engine.send(["a": "preset_apply", "i": i, "name": p.name]) } }
+                    if engine.snap.presets.isEmpty { Text(tr("Nessun preset salvato")) }
+                    if !engine.snap.presets.isEmpty { Divider(); Menu(tr("Elimina")) { ForEach(engine.snap.presets, id: \.name) { p in Button(p.name) { engine.send(["a": "preset_delete", "name": p.name]) } } } }
+                }.controlSize(.small).fixedSize() }
+            HStack { TextField(tr("Nome del preset"), text: $presetName).textFieldStyle(.roundedBorder)
+                Button(tr("Salva")) { engine.send(["a": "preset_save", "i": i, "name": presetName]); presetName = "" }.controlSize(.small).disabled(presetName.trimmingCharacters(in: .whitespaces).isEmpty) }
+            Text(tr("Un preset ricorda sfondo, testo e durata e vale per tutte le scalette.")).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
 /// Impostazioni di un singolo elemento (riquadro a comparsa, niente accordion).
 struct ItemSettings: View {
     @ObservedObject var engine: Engine
@@ -410,6 +436,7 @@ struct ItemSettings: View {
             if it.kind == "pausa" || it.kind == "nero" {
                 if it.kind == "pausa" { TextRow(label: tr("Testo"), value: it.text, placeholder: tr("Intervallo")) { engine.send(["a": "setitem", "i": i, "text": $0]) } }
                 OptField(label: tr("Durata (s)"), value: it.secs, placeholder: "") { engine.send(["a": "setitem", "i": i, "secs": $0]) }
+                if it.kind == "pausa" { BgControls(engine: engine, i: i, it: it) }
             } else {
                 Group {
                     OptField(label: tr("Nero prima (s)"), value: it.pre, placeholder: n(s.defpre)) { engine.send(["a": "setitem", "i": i, "pre": $0]) }
@@ -428,6 +455,14 @@ struct ItemSettings: View {
                     Picker("", selection: Binding(get: { it.loop < 0 ? -1 : it.loop == 0 ? 0 : 1 }, set: { engine.send(["a": "setitem", "i": i, "loop": $0 == 1 ? 1 : $0]) })) {
                         Text(tr("Nessuna")).tag(0); Text(tr("Infinita")).tag(-1); Text(tr("Un numero di volte")).tag(1) }.labelsHidden() }
                 if it.loop > 0 { OptField(label: tr("Volte in più"), value: Double(it.loop), placeholder: "1") { engine.send(["a": "setitem", "i": i, "loop": Double($0) ?? 1]) } }
+                Divider()
+                OptField(label: tr("Intervallo a (min)"), value: (it.split ?? 0) > 0 ? (it.split! / 6).rounded() / 10 : nil, placeholder: tr("nessuno")) { engine.send(["a": "setitem", "i": i, "split": (Double($0.replacingOccurrences(of: ",", with: ".")) ?? 0) * 60]) }
+                if (it.split ?? 0) > 0 {
+                    OptField(label: tr("Durata (min)"), value: it.secs / 60, placeholder: "10") { engine.send(["a": "setitem", "i": i, "secs": max(1, Double($0.replacingOccurrences(of: ",", with: ".")) ?? 10) * 60]) }
+                    TextRow(label: tr("Testo"), value: it.text, placeholder: tr("Intervallo")) { engine.send(["a": "setitem", "i": i, "text": $0]) }
+                    BgControls(engine: engine, i: i, it: it)
+                }
+                Text(tr("Il film si ferma al minuto indicato, la sala mostra testo e conto alla rovescia, poi riparte da lì.")).font(.caption).foregroundStyle(.secondary)
                 Text(tr("Un film in ripetizione continua finché non togli “Ripeti” dai controlli; poi la scaletta prosegue.")).font(.caption).foregroundStyle(.secondary)
             }
         }.padding(14)

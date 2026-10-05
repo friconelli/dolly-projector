@@ -9,6 +9,10 @@ App Mac di regia di proiezione per il cinema: mpv a schermo intero (senza contro
 - `legacy/` — prima versione (motore Python + interfaccia web), tenuta come riferimento.
 - Aspetto senza aprire finestre: `Dolly --snapshot out.png --folder CARTELLA --play 1`.
 
+## Intervalli
+- **Intervallo a metà film**: nelle impostazioni del film, "Intervallo a (min)" + durata e testo. Il film si ferma a quel minuto, la sala mostra testo e conto alla rovescia, poi riparte da lì.
+- **Sfondo** (immagine o video in loop, audio opzionale) e **preset** (sfondo, testo, durata; in `~/Library/Application Support/Dolly/presets.json`) per ogni intervallo.
+
 ## Telecomando dal telefono
 Scheda **Altro → Telecomando dal telefono**: attivando l'interruttore l'app apre un piccolo server sulla rete locale (porta 8484, spento di default). Il telefono inquadra il QR o apre l'indirizzo, inserisce il PIN (4 cifre, in `~/Library/Application Support/Dolly/remote.json`) e comanda play/pausa, precedente/successivo, tempo, volume, muto, ripeti film, scena e intervalli. Non serve internet, solo una rete comune (router, hotspot…).
 - Solo i comandi elencati in `allowed` (`Remote.swift`) sono accettati: niente cartelle, file, scalette o impostazioni dell'app.

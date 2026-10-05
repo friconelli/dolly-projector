@@ -25,6 +25,8 @@ struct Item: Equatable {
     var secs = 600.0
     var text = ""
     var loop = 0            // ripetizioni di questo film: 0 nessuna, -1 all'infinito, N volte in più
+    var bg = ""; var bgaudio = false   // sfondo dell'intervallo: immagine o video in loop (vuoto = nero), con o senza audio
+    var split = 0.0         // secondi dall'inizio a cui il film si ferma per un intervallo (0 = nessuno); durata e testo sono secs/text
     var submode: String? = nil   // sottotitoli di questo film: nil = predefinito della scena; "file" | "none" | "forced" | "full"
 
     init(path: String = "", kind: String = "film", secs: Double = 600, text: String = "") { self.path = path; self.kind = kind; self.secs = secs; self.text = text }
@@ -32,11 +34,11 @@ struct Item: Equatable {
         kind = asString(d["kind"]) ?? "film"; path = asString(d["path"]) ?? ""
         pre = asDouble(d["pre"]); post = asDouble(d["post"]); vol = asDouble(d["vol"])
         alang = asString(d["alang"]) ?? ""; slang = asString(d["slang"]) ?? ""; secs = asDouble(d["secs"]) ?? 600; text = asString(d["text"]) ?? ""
-        loop = asInt(d["loop"]) ?? 0; submode = asString(d["submode"]).flatMap { $0.isEmpty ? nil : $0 }
+        loop = asInt(d["loop"]) ?? 0; split = asDouble(d["split"]) ?? 0; bg = asString(d["bg"]) ?? ""; bgaudio = asBool(d["bgaudio"]) ?? false; submode = asString(d["submode"]).flatMap { $0.isEmpty ? nil : $0 }
     }
     var dict: [String: Any] {
         ["kind": kind, "path": path, "pre": pre as Any? ?? NSNull(), "post": post as Any? ?? NSNull(), "vol": vol as Any? ?? NSNull(),
-         "alang": alang, "slang": slang, "secs": secs, "text": text, "loop": loop, "submode": submode as Any? ?? NSNull()]
+         "alang": alang, "slang": slang, "secs": secs, "text": text, "loop": loop, "split": split, "bg": bg, "bgaudio": bgaudio, "submode": submode as Any? ?? NSNull()]
     }
     var title: String { kind == "pausa" ? (text.isEmpty ? tr("Pausa") : text) : kind == "nero" ? trf("Nero (%@ s)", secs == secs.rounded() ? String(Int(secs)) : String(secs)) : (path as NSString).lastPathComponent }
 }
@@ -56,16 +58,17 @@ struct Track: Decodable, Identifiable, Equatable { var id: Int; var t: String; v
 struct Chapter: Decodable, Equatable { var t: String; var s: Double }
 struct AudioDev: Decodable, Equatable { var id: String; var t: String }
 struct ItemState: Decodable, Equatable {
-    var kind: String; var pre: Double?; var post: Double?; var vol: Double?; var alang: String; var slang: String; var secs: Double; var text: String; var name: String; var ok: Bool; var loop: Int; var submode: String?
+    var kind: String; var pre: Double?; var post: Double?; var vol: Double?; var alang: String; var slang: String; var secs: Double; var text: String; var name: String; var ok: Bool; var loop: Int; var split: Double? ; var bg: String?; var bgaudio: Bool?; var submode: String?
     var label: String { kind == "film" ? (name as NSString).deletingPathExtension : name }   // i nomi di pausa/nero possono contenere un punto
 }
 struct Resume: Decodable, Equatable { var idx: Int; var pos: Double }
 struct Info: Decodable, Equatable { var res: String?; var fps: Double?; var vcodec: String?; var acodec: String?; var dropped: Int? }
+struct Preset: Decodable, Equatable { var name: String; var bg: String; var bgaudio: Bool; var text: String; var secs: Double }
 struct Snap: Decodable {
     var ok = true
     var name = tr("Scena"); var mode = "idle"; var idx = -1; var sel = 0; var next = -1; var label = ""; var left = 0.0
     var err: String?; var restarts = 0; var auto = true; var loop = false; var defpre = 0.0; var defpost = 0.0
-    var resume: Resume?; var defsub = "file"; var pid = 0; var folder = ""; var items: [ItemState] = []; var lib: [String] = []; var saved: [String] = []
+    var resume: Resume?; var defsub = "file"; var pid = 0; var folder = ""; var items: [ItemState] = []; var lib: [String] = []; var saved: [String] = []; var presets: [Preset] = []
     var playing = false; var pause = false; var time = 0.0; var dur = 0.0
     var audio: [Track] = []; var sub: [Track] = []; var video: [Track] = []; var chapters: [Chapter] = []; var chapter: Int?
     var ab: [Double?] = [nil, nil]; var props: [String: JSONValue] = [:]; var adevs: [AudioDev] = []; var info = Info()

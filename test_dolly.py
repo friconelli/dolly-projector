@@ -485,6 +485,41 @@ def t_loop_film():
         check(s.state()["restarts"] == 0, "nessun riavvio")
     finally: s.stop()
 
+def t_intervallo_film():
+    """Intervallo a metà film: il film si ferma al punto indicato, conto alla rovescia, poi riparte da lì."""
+    s = Srv(MEDIA, files=["01_a.mp4", "04_d.mp4"])
+    try:
+        s.act(a="setitem", i=0, split=3, secs=4, text="Pausa caffè"); s.act(a="play", i=0)
+        st = s.wait(lambda x: x["mode"] == "wait", 10)
+        check(st is not None and st["idx"] == 0 and 2 < st["left"] <= 4, f"a 3 s il film si ferma e parte l'intervallo ({st and st['left']})")
+        s.act(a="extend", v=60); check(s.state()["left"] > 30, "+1 min allunga l'intervallo")
+        s.act(a="skipgap"); st = s.wait(lambda x: x["mode"] == "playing" and x["idx"] == 0 and x["time"] > 0, 6)
+        check(st is not None and 2.5 < st["time"] < 6, f"dopo l'intervallo il film riparte dallo stesso punto ({st and st['time']})")
+        time.sleep(2); check(s.state()["mode"] == "playing", "l'intervallo non si ripete due volte")
+        s.act(a="setitem", i=0, split=0); check(s.state()["items"][0]["split"] == 0, "split azzerabile")
+        check(s.state()["restarts"] == 0, "nessun riavvio")
+    finally: s.stop()
+
+def t_sfondo_preset():
+    """Sfondo (immagine) dell'intervallo e preset salvati, applicati ed eliminati."""
+    img = os.path.join(MEDIA, "bg_test.png")
+    if not os.path.exists(img): subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x224466:s=320x180", "-frames:v", "1", img], check=True)
+    s = Srv(MEDIA, files=["01_a.mp4", "04_d.mp4"])
+    try:
+        s.act(a="addpause", secs=20, text="Torniamo subito"); s.act(a="setitem", i=2, bg=img)
+        s.act(a="play", i=2); st = s.wait(lambda x: x["mode"] == "wait" and x["playing"], 6)
+        check(st is not None and st["items"][2]["bg"] == img, "durante l'intervallo mpv mostra l'immagine di sfondo")
+        s.act(a="setitem", i=2, bg="/non/esiste.png"); s.act(a="play", i=2); time.sleep(1)
+        check(s.state()["mode"] == "wait" and not s.state()["playing"], "sfondo mancante: schermo nero, nessun errore")
+        s.act(a="setitem", i=2, bg=img, text="Pausa"); s.act(a="preset_save", i=2, name="Cineclub")
+        check([p["name"] for p in s.state()["presets"]] == ["Cineclub"], "preset salvato")
+        s.act(a="addpause", secs=5, text="x"); s.act(a="preset_apply", i=3, name="Cineclub"); it = s.state()["items"][3]
+        check(it["bg"] == img and it["text"] == "Pausa" and it["secs"] == 20, f"preset applicato ({it['bg'][-11:]}, {it['text']}, {it['secs']})")
+        s.act(a="preset_delete", name="Cineclub"); check(s.state()["presets"] == [], "preset eliminato")
+        s.act(a="skipgap"); check(s.wait(lambda x: x["idx"] == 3, 5) is not None, "alla fine dell'intervallo la scaletta prosegue")
+        check(s.state()["restarts"] == 0, "nessun riavvio")
+    finally: s.stop()
+
 def t_remote():
     """Telecomando dal telefono: PIN, accesso, comandi ammessi e rifiutati, stato ridotto, anteprima."""
     import urllib.error
@@ -679,7 +714,7 @@ def t_soak(minutes):
     finally: s.stop()
 
 TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "trascinamento_gui": t_trascinamento_gui, "trascinamento_logica": t_trascinamento_logica, "inglese": t_inglese, "trascina_file": t_trascina_file, "update": t_update,
-         "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film}
+         "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film, "intervallofilm": t_intervallo_film, "sfondo": t_sfondo_preset}
 
 def main():
     global MEDIA

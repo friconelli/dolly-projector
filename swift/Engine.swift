@@ -19,6 +19,8 @@ final class Engine: ObservableObject {
 
     private var items: [Item] = [], name = tr("Scena"), defpre = 0.0, defpost = 0.0, auto = true, loop = false, defsub = "file"   // defsub: sottotitoli di tutta la scena
     private var prefs: [String: Any] = [:], resume: [String: Any]?
+    private var presets: [[String: Any]] = []   // preset degli intervalli (sfondo, testo, durata), validi per tutte le scalette
+    private var splitting = false, splitDone = -1   // intervallo a metà film in corso / già fatto per questo film
     private var mode = "idle", idx = -1, sel = 0, next = -1, until = 0.0, label = ""
     private var pos = 0.0, dur = 0.0, loadedAt = 0.0, shown = 0, retries = 0, fails = 0, restarts = 0, lastSave = 0.0
     private var err: String?, quitting = false, pvData: Data?, pvT = 0.0
@@ -31,7 +33,7 @@ final class Engine: ObservableObject {
         home = Engine.homePath
         try FileManager.default.createDirectory(atPath: home + "/playlists", withIntermediateDirectories: true)
         mpv = Mpv(binary: mpvBinary, extra: extra, windowed: windowed, screen: screen)
-        loadCurrent(); killOrphans()
+        loadCurrent(); killOrphans(); presets = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: home + "/presets.json")))) as? [[String: Any]] ?? []
         if resetPlaylist { items = videosIn(self.folder).map { Item(path: $0) }; idx = -1; sel = 0; resume = nil }   // cartella cambiata: la scaletta riparte dai suoi film
         try mpv.start(); applyPrefs()
         if autoresume, let r = resume, let i = asInt(r["idx"]), i < items.count, nowT() - (asDouble(r["t"]) ?? 0) < 60 {   // riavvio dopo un arresto imprevisto, a proiezione in corso
@@ -53,6 +55,7 @@ final class Engine: ObservableObject {
         let tmp = path + ".tmp"
         if (try? d.write(to: URL(fileURLWithPath: tmp))) != nil { _ = try? FileManager.default.replaceItemAt(URL(fileURLWithPath: path), withItemAt: URL(fileURLWithPath: tmp)) }
     }
+    private func writePresets() { writeJSON(presets, to: home + "/presets.json") }
     private func save() { writeJSON(dump(), to: cfile) }
     private func loadCurrent() {
         let d = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: cfile)))) as? [String: Any] ?? [:]
@@ -107,8 +110,9 @@ final class Engine: ObservableObject {
     private func load(_ i: Int, start: Double = 0) {
         guard items.indices.contains(i) else { return }
         let it = items[i]
+        splitting = false; if start == 0 { splitDone = -1 }
         if it.kind == "pausa" || it.kind == "nero" {   // intervallo (testo e conto alla rovescia) o nero puro: schermo nero per un tempo
-            _ = try? mpv.ipc([["stop"]]); mode = "wait"; idx = i; sel = i; until = nowT() + it.secs; shown = 0; err = nil; return
+            startBg(it); mode = "wait"; idx = i; sel = i; until = nowT() + it.secs; shown = 0; err = nil; return
         }
         if !FileManager.default.fileExists(atPath: it.path) {
             err = trf("file mancante: %@", it.title); log(err!); advance(i); return
@@ -126,6 +130,14 @@ final class Engine: ObservableObject {
         mode = "playing"; idx = i; sel = i; loadedAt = nowT(); pos = start; dur = 0; err = nil
         if start == 0 { retries = 0 }
     }
+    /// Schermo dell'intervallo: lo sfondo scelto in loop (opzioni valide solo per quel file), altrimenti nero.
+    private func startBg(_ it: Item) {
+        guard !it.bg.isEmpty, FileManager.default.fileExists(atPath: it.bg) else { _ = try? mpv.ipc([["stop"]]); return }
+        let opts = "loop-file=inf,image-display-duration=inf,mute=\(it.bgaudio ? "no" : "yes"),pause=no,aid=\(it.bgaudio ? "auto" : "no"),sid=no"
+        do { try mpv.ipc([["set_property", "loop-file", "no"], ["loadfile", it.bg, "replace", -1, opts], ["set_property", "pause", false]]) } catch { log("sfondo:", error); _ = try? mpv.ipc([["stop"]]) }
+    }
+    /// Fine dell'intervallo a metà film: il film riparte dal punto in cui si era fermato.
+    private func endSplit() { _ = try? mpv.ipc([["show-text", "", 1]]); load(idx, start: items[idx].split) }
     private func gap(_ i: Int, _ secs: Double, _ lab: String) {
         if mode == "playing" || mode == "wait" { _ = try? mpv.ipc([["stop"]]) }
         mode = "gap"; next = i; sel = i; until = nowT() + secs; label = lab
@@ -155,9 +167,9 @@ final class Engine: ObservableObject {
         if mode == "gap" && now >= until { load(next) }
         else if mode == "wait" {
             let left = until - now
-            if left <= 0 { if items[idx].kind == "pausa" { _ = try? mpv.ipc([["show-text", "", 1]]) }; advance(idx); return }
-            if Int(left) != shown && items[idx].kind == "pausa" {   // una volta al secondo: testo + tempo che manca, sullo schermo della sala
-                shown = Int(left); let txt = items[idx].text
+            if left <= 0 { if splitting { endSplit(); return }; if items[idx].kind == "pausa" { _ = try? mpv.ipc([["show-text", "", 1]]) }; advance(idx); return }
+            if Int(left) != shown && (items[idx].kind == "pausa" || splitting) {   // una volta al secondo: testo + tempo che manca, sullo schermo della sala
+                shown = Int(left); let txt = items[idx].kind == "pausa" || !items[idx].text.isEmpty ? items[idx].text : tr("Intervallo")
                 _ = try? mpv.ipc([["show-text", (txt.isEmpty ? "" : txt + "\n") + String(format: "%d:%02d", Int(left) / 60, Int(left) % 60), 1500]])
             }
         } else if mode == "playing" {
@@ -174,6 +186,10 @@ final class Engine: ObservableObject {
                 }
             } else {
                 if let t = asDouble(r["time-pos"]), t != 0 { pos = t }
+                let sp = items[idx].split   // punto di divisione: il film si ferma e parte l'intervallo (secs/text del film)
+                if sp > 0 && items[idx].kind == "film" && splitDone != idx && pos >= sp && pos < sp + 3 && !(asBool(r["pause"]) ?? false) {
+                    splitDone = idx; startBg(items[idx]); mode = "wait"; splitting = true; until = now + items[idx].secs; shown = 0; return
+                }
                 if let d = asDouble(r["duration"]), d != 0 { dur = d }
                 if langPending { applyLangs(items[idx]) }
                 if now - lastSave > 2 { lastSave = now; resume = ["idx": idx, "pos": pos, "t": now]; save() }
@@ -302,7 +318,7 @@ final class Engine: ObservableObject {
         case "toggle":   // play/pausa: se non sta suonando niente parte l'elemento selezionato
             if mode == "playing" { try mpv.ipc([["cycle", "pause"]]) } else if mode == "idle" { startItem(sel) }
         case "skipgap":
-            if mode == "gap" { load(next) } else if mode == "wait" { _ = try? mpv.ipc([["show-text", "", 1]]); advance(idx) }
+            if mode == "gap" { load(next) } else if mode == "wait" { if splitting { endSplit() } else { _ = try? mpv.ipc([["show-text", "", 1]]); advance(idx) } }
         case "extend": if mode == "wait" { until += asDouble(d["v"]) ?? 60 }   // intervallo più lungo
         case "next": startItem(base() + 1)
         case "prev":   // va sempre all'elemento precedente; solo sul primo (non c'è un precedente) riporta il film all'inizio
@@ -355,11 +371,22 @@ final class Engine: ObservableObject {
             if d.keys.contains("post") { items[i].post = try optNum(d["post"]) }
             if d.keys.contains("vol") { items[i].vol = try optNum(d["vol"]) }
             if let v = asDouble(d["secs"]) { items[i].secs = max(items[i].kind == "nero" ? 0.5 : 1, v) }
+            if let v = asString(d["bg"]) { items[i].bg = v }
+            if let v = asBool(d["bgaudio"]) { items[i].bgaudio = v }
+            if let v = asDouble(d["split"]) { items[i].split = max(0, v) }
             if d.keys.contains("loop") { items[i].loop = max(-1, min(99, Int(asDouble(d["loop"]) ?? 0))) }
             if d.keys.contains("submode") { let m = asString(d["submode"]) ?? ""; items[i].submode = ["file", "none", "forced", "full"].contains(m) ? m : nil
                 if i == idx && mode == "playing" { langPending = true; langTries = 0 } }
             if (d.keys.contains("alang") || d.keys.contains("slang")) && i == idx && mode == "playing" { langPending = true; langTries = 0 }   // vale subito sul film in corso
             for k in ["alang", "slang", "text"] { if let v = d[k] { let s = String((asString(v) ?? "").prefix(100)); switch k { case "alang": items[i].alang = s; case "slang": items[i].slang = s; default: items[i].text = s } } }
+        case "preset_save":   // salva lo sfondo/testo/durata dell'elemento i come preset (stesso nome = sostituisce)
+            guard let i = asInt(d["i"]), items.indices.contains(i), let n = asString(d["name"]), !n.isEmpty else { throw DollyError(tr("indice fuori range")) }
+            let it = items[i]; presets.removeAll { asString($0["name"]) == n }
+            presets.append(["name": String(n.prefix(60)), "bg": it.bg, "bgaudio": it.bgaudio, "text": it.text, "secs": it.secs]); writePresets()
+        case "preset_delete": presets.removeAll { asString($0["name"]) == asString(d["name"]) }; writePresets()
+        case "preset_apply":
+            guard let i = asInt(d["i"]), items.indices.contains(i), let p = presets.first(where: { asString($0["name"]) == asString(d["name"]) }) else { throw DollyError(tr("preset non trovato")) }
+            items[i].bg = asString(p["bg"]) ?? ""; items[i].bgaudio = asBool(p["bgaudio"]) ?? false; items[i].text = asString(p["text"]) ?? ""; items[i].secs = asDouble(p["secs"]) ?? items[i].secs
         case "rename": name = String((asString(d["v"]) ?? "").prefix(60))
         case "pl_save":
             if let n = asString(d["name"]), !n.isEmpty { name = String(n.prefix(60)) }
@@ -381,8 +408,8 @@ final class Engine: ObservableObject {
             "auto": auto, "loop": loop, "defsub": defsub, "pid": Int(mpv.proc?.processIdentifier ?? 0), "defpre": defpre, "defpost": defpost, "resume": resume as Any? ?? NSNull(), "folder": folder,
             "items": items.map { i -> [String: Any] in
                 ["kind": i.kind, "pre": i.pre as Any? ?? NSNull(), "post": i.post as Any? ?? NSNull(), "vol": i.vol as Any? ?? NSNull(), "alang": i.alang, "slang": i.slang,
-                 "secs": i.secs, "text": i.text, "name": i.title, "ok": i.kind != "film" || FileManager.default.fileExists(atPath: i.path), "loop": i.loop, "submode": i.submode as Any? ?? NSNull()] },
-            "lib": videosIn(folder).map { ($0 as NSString).lastPathComponent }, "saved": savedLists(),
+                 "secs": i.secs, "text": i.text, "name": i.title, "ok": i.kind != "film" || FileManager.default.fileExists(atPath: i.path), "loop": i.loop, "split": i.split, "bg": i.bg, "bgaudio": i.bgaudio, "submode": i.submode as Any? ?? NSNull()] },
+            "presets": presets, "lib": videosIn(folder).map { ($0 as NSString).lastPathComponent }, "saved": savedLists(),
             "playing": false, "pause": false, "time": 0.0, "dur": 0.0, "audio": [Any](), "sub": [Any](), "video": [Any](), "chapters": [Any](),
             "chapter": NSNull(), "ab": [NSNull(), NSNull()], "props": [String: Any](), "adevs": [Any](), "info": [String: Any]()]
         let extra = ["pause", "time-pos", "duration", "track-list", "chapter-list", "chapter", "ab-loop-a", "ab-loop-b", "video-params", "container-fps", "video-codec",
