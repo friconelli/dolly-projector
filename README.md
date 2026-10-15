@@ -9,6 +9,11 @@ App Mac di regia di proiezione per il cinema: mpv a schermo intero (senza contro
 - `legacy/` — prima versione (motore Python + interfaccia web), tenuta come riferimento.
 - Aspetto senza aprire finestre: `Dolly --snapshot out.png --folder CARTELLA --play 1`.
 
+## Scaletta: avvio senza cartella e selezione multipla
+- La **cartella dei film è facoltativa**: all'avvio l'app non la chiede, parte con la scaletta vuota e i film si aggiungono dal pulsante + o trascinandoli. La cartella si sceglie quando serve (scheda Scena → *Scegli…*, o menu): la prima volta la scaletta già costruita resta com'è; cambiandola dopo, la scaletta riparte dai film della nuova cartella.
+- **Selezione multipla**: clic seleziona, ⌘+clic (Ctrl su Windows) aggiunge o toglie, Maiusc+clic seleziona un intervallo, ⌘A (Ctrl+A) tutto, Esc deseleziona. Sulla selezione: Canc toglie gli elementi (con conferma), il menu del clic destro li sposta su/giù, trascinare la maniglia di un elemento selezionato sposta tutto il blocco, e le impostazioni di uno dei selezionati (icona a destra) valgono per tutti.
+- Motore: azioni `removemany` (`indices`) e `reordermany` (`from`, `to`, `after`); test `-k multi,nofolder`.
+
 ## DCP (cinema digitale)
 Dolly proietta i **DCP non cifrati**: Aggiungi → *DCP (cartella)…* (o trascina la cartella del pacchetto nella scaletta; si può anche aggiungere un singolo file CPL, o mettere i DCP come sottocartelle della cartella dei film: compaiono nella libreria). Un pacchetto con più versioni (più CPL) dà un elemento per versione.
 - Dal CPL si costruisce per mpv una lista di montaggio (EDL) con un flusso video (JPEG 2000, spazio colore XYZ, che mpv converte da solo) e uno audio (PCM 24 bit, 5.1) che attraversano tutti i reel senza interruzioni; seek, riprendi, ripeti e intervalli funzionano come per un film normale.

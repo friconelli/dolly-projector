@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // niente rallentamenti di App Nap né stop del Mac mentre l'app è aperta
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled, .idleDisplaySleepDisabled, .latencyCritical], reason: tr("Proiezione"))
         buildMenu()
-        if folder() == nil && !chooseFolder() { NSApp.terminate(nil); return }
+        // la cartella dei film è facoltativa: senza, l'app parte con la scaletta vuota (i film si aggiungono dal pulsante + o trascinandoli)
         let unclean = FileManager.default.fileExists(atPath: marker)
         try? FileManager.default.createDirectory(atPath: Engine.homePath, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: marker, contents: nil)
@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     /// Il player può impiegare qualche secondo ad avviarsi (la prima volta su Apple Silicon, Rosetta lo prepara): la finestra c'è subito.
     func startEngine(autoresume: Bool, resetPlaylist: Bool = false) {
-        guard let f = folder() else { model.starting = false; return }
+        let f = folder() ?? ""
         model.starting = true
         let windowed = windowedMode, screen = screenIndex, mpv = bundledMpv()
         startGroup.enter()
@@ -112,8 +112,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
     @objc func changeFolder() {
+        let had = folder() != nil   // la prima volta che si sceglie una cartella la scaletta già costruita resta com'è
         let go = {
-            if self.chooseFolder() { self.stopEngine(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.startEngine(autoresume: false, resetPlaylist: true) } }
+            if self.chooseFolder() { self.stopEngine(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.startEngine(autoresume: false, resetPlaylist: had) } }
         }
         if let e = model.engine, e.snap.mode == "playing" || e.snap.mode == "wait" || e.snap.mode == "gap" {
             confirm(tr("Cambiare cartella interrompe la proiezione in corso e la scaletta riparte dai film della nuova cartella. Continuare?"), ok: tr("Continua"), go)
@@ -146,6 +147,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self = self, let en = self.model.engine, e.window === self.window else { return e }
             if NSApp.keyWindow?.firstResponder is NSText { return e }   // si sta scrivendo in un campo
+            // selezione nella scaletta: ⌘A tutto, Esc deseleziona, Canc toglie i selezionati
+            let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
+            if mods == .command && e.keyCode == 0 { en.selectAll(); return nil }
+            if e.keyCode == 53 && !en.selection.isEmpty { en.selection = []; return nil }
+            if (e.keyCode == 51 || e.keyCode == 117) && !en.selection.isEmpty && (mods.isEmpty || mods == .command) { en.removeSelected(); return nil }
             guard e.modifierFlags.intersection([.command, .option, .control]).isEmpty else { return e }
             let big = e.modifierFlags.contains(.shift)
             switch e.keyCode {
@@ -231,6 +237,7 @@ final class SnapshotRunner {
         window.contentView = host; window.orderBack(nil)
         if ProcessInfo.processInfo.environment["DOLLY_DARK"] == "1" { window.appearance = NSAppearance(named: .darkAqua) }   // per gli screenshot del sito
         if let p = play { _ = engine.actSync(["a": "play", "i": p]) }
+        if let sel = ProcessInfo.processInfo.environment["DOLLY_SELECT"] { engine.selection = Set(sel.split(separator: ",").compactMap { Int($0) }) }   // solo per gli screenshot di verifica
         // Collaudo del trascinamento: DOLLY_DRAG="x,yDa,yA" (punti dall'alto a sinistra della finestra) preme sulla maniglia, trascina a passi e rilascia, con veri NSEvent nella finestra.
         if let spec = ProcessInfo.processInfo.environment["DOLLY_DRAG"] {
             let v = spec.split(separator: ",").compactMap { Double($0) }

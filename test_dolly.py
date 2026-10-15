@@ -766,8 +766,49 @@ def t_dcp():
         s.act(a="clear"); s.act(a="addlib"); check(len(s.state()["items"]) == 2, "tutta la libreria (film + DCP)")
     finally: s.stop()
 
+def t_multi():
+    """Selezione multipla: tolgono/spostano più elementi insieme (anche non contigui); indici di film in corso e prossimo seguono lo spostamento."""
+    s = Srv(MEDIA, files=ALL)   # 01_a 02_b 03_hevc10 04_d 05_e
+    try:
+        names = lambda: [i["name"] for i in s.state()["items"]]
+        def go(**d): return s.act(**d)
+        go(**{"a": "reordermany", "from": [0, 1], "to": 3, "after": True})
+        check(names() == ["03_hevc10.mkv", "04_d.mp4", "01_a.mp4", "02_b.mkv", "05_e.mkv"], f"blocco 0-1 dopo l'elemento 3 ({names()})")
+        go(**{"a": "reordermany", "from": [3, 4], "to": 0, "after": False})
+        check(names() == ["02_b.mkv", "05_e.mkv", "03_hevc10.mkv", "04_d.mp4", "01_a.mp4"], f"blocco 3-4 prima dell'elemento 0 ({names()})")
+        go(**{"a": "reordermany", "from": [0, 2], "to": 4, "after": True})
+        check(names() == ["05_e.mkv", "04_d.mp4", "01_a.mp4", "02_b.mkv", "03_hevc10.mkv"], f"elementi non contigui (0 e 2) dopo l'ultimo ({names()})")
+        before = names()
+        for bad in ({"from": [1], "to": 1, "after": True}, {"from": [], "to": 2, "after": True}, {"from": [9], "to": 2, "after": True}, {"from": [0, 1], "to": 99, "after": True}, {"from": [0, 1], "to": 1, "after": False}):
+            go(**{"a": "reordermany", **bad})
+        check(names() == before and s.state()["ok"], "richieste non valide ignorate (destinazione dentro il blocco, fuori range, vuote)")
+        go(a="removemany", indices=[1, 3, 99, 1, -4])
+        check(names() == ["05_e.mkv", "01_a.mp4", "03_hevc10.mkv"], f"toglie più elementi insieme (doppi e fuori range ignorati): {names()}")
+        # il film in corso segue lo spostamento
+        go(a="play", i=1); st = s.wait(lambda x: x["mode"] == "playing" and x["playing"], 8)
+        check(st is not None and st["idx"] == 1, "01_a in onda (posizione 1)")
+        go(**{"a": "reordermany", "from": [0], "to": 2, "after": True}); st = s.state()
+        check(names() == ["01_a.mp4", "03_hevc10.mkv", "05_e.mkv"] and st["idx"] == 0 and st["mode"] == "playing", f"dopo lo spostamento il film in onda è alla posizione {st['idx']}")
+        go(a="removemany", indices=[2]); st = s.state(); check(st["mode"] == "playing" and st["idx"] == 0, "togliere un altro elemento non ferma il film in onda")
+        go(a="removemany", indices=[0, 1]); st = s.state(); check(st["mode"] == "idle" and st["items"] == [], "togliendo anche il film in onda la proiezione si ferma")
+        check(st["restarts"] == 0, "nessun riavvio di mpv")
+    finally: s.stop()
+
+def t_nofolder():
+    """Avvio senza cartella dei film: scaletta e libreria vuote, si lavora con i file aggiunti a mano e tutto si ricorda al riavvio."""
+    s = Srv("", files=None)
+    try:
+        st = s.state(); check(st["ok"] and st["items"] == [] and st["lib"] == [] and st["folder"] == "", f"parte con scaletta vuota ({st['items']}, lib={st['lib']}, folder={st['folder']!r})")
+        r = s.act(a="addlib", i=0); check("error" in r, "aggiungere dalla libreria vuota dà un errore chiaro"); s.act(a="addlib"); check(s.state()["items"] == [], "«tutta la libreria» senza cartella non aggiunge nulla")
+        s.act(a="add", paths=[os.path.join(MEDIA, "01_a.mp4"), os.path.join(MEDIA, "04_d.mp4")]); check([i["name"] for i in s.state()["items"]] == ["01_a.mp4", "04_d.mp4"], "film aggiunti a mano")
+        s.act(a="play", i=0); st = s.wait(lambda x: x["mode"] == "playing" and x["playing"] and x["time"] > .3, 8); check(st is not None, "si proietta senza cartella")
+        s.act(a="stop"); s.stop(); s.start()
+        check([i["name"] for i in s.state()["items"]] == ["01_a.mp4", "04_d.mp4"], "la scaletta si ricorda al riavvio, ancora senza cartella")
+        check(s.state()["restarts"] == 0, "nessun riavvio di mpv")
+    finally: s.stop()
+
 TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "trascinamento_gui": t_trascinamento_gui, "trascinamento_logica": t_trascinamento_logica, "inglese": t_inglese, "trascina_file": t_trascina_file, "update": t_update,
-         "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film, "intervallofilm": t_intervallo_film, "sfondo": t_sfondo_preset, "dcp": t_dcp}
+         "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film, "intervallofilm": t_intervallo_film, "sfondo": t_sfondo_preset, "dcp": t_dcp, "multi": t_multi, "nofolder": t_nofolder}
 
 def main():
     global MEDIA

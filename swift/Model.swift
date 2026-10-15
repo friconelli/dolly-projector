@@ -88,3 +88,13 @@ struct Snap: Decodable {
     func b(_ k: String) -> Bool { props[k]?.b ?? false }
     func s(_ k: String) -> String { props[k]?.s ?? "" }
 }
+
+/// Nuovo ordine (vecchi indici) dopo aver spostato un blocco di elementi, che mantengono l'ordine reciproco, subito dopo (after) o prima dell'elemento t. nil se non cambia nulla o se t fa parte del blocco.
+func blockOrder(count: Int, chosen: Set<Int>, to t: Int, after: Bool) -> [Int]? {
+    let ch = chosen.filter { (0..<count).contains($0) }
+    guard !ch.isEmpty, (0..<count).contains(t), !ch.contains(t) else { return nil }
+    let moved = ch.sorted(), rest = (0..<count).filter { !ch.contains($0) }
+    let p = rest.filter { after ? $0 <= t : $0 < t }.count
+    let order = Array(rest[..<p]) + moved + Array(rest[p...])
+    return order == Array(0..<count) ? nil : order
+}

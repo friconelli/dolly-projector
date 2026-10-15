@@ -8,6 +8,8 @@ func nowT() -> Double { Date().timeIntervalSince1970 }
 /// Tutto lo stato vive sulla coda `q`; l'interfaccia riceve un'istantanea aggiornata ogni secondo.
 final class Engine: ObservableObject {
     @Published var snap = Snap()
+    @Published var selection = Set<Int>()   // elementi selezionati nella scaletta (solo interfaccia)
+    var selAnchor: Int?
     @Published var previewImage: NSImage?   // aggiornata dal motore, una volta al secondo, finché si proietta
     let q = DispatchQueue(label: "dolly.engine")
     let folder: String, home: String
@@ -302,6 +304,18 @@ final class Engine: ObservableObject {
         func fix(_ k: Int) -> Int { k == f ? t : (f < t && k > f && k <= t) ? k - 1 : (f > t && k >= t && k < f) ? k + 1 : k }
         idx = fix(idx); next = fix(next); sel = fix(sel)
     }
+    /// Toglie più elementi insieme (indici qualunque, anche ripetuti o fuori range). Si va dal fondo, così gli indici restano validi.
+    private func removeItems(_ list: [Int]) {
+        for i in Set(list).filter({ items.indices.contains($0) }).sorted(by: >) { removeItem(i) }
+    }
+    /// Sposta più elementi insieme (mantengono l'ordine reciproco): il blocco va dopo (after) o prima dell'elemento t, che non deve far parte del blocco.
+    private func reorderItems(_ from: [Int], _ t: Int, after: Bool) {
+        guard let order = blockOrder(count: items.count, chosen: Set(from), to: t, after: after) else { return }
+        var inv: [Int: Int] = [:]; for (n, o) in order.enumerated() { inv[o] = n }
+        items = order.map { items[$0] }
+        func fix(_ k: Int) -> Int { k >= 0 ? (inv[k] ?? k) : k }
+        idx = fix(idx); next = fix(next); sel = fix(sel); splitDone = fix(splitDone)
+    }
     private func importM3U(_ path: String) {
         let baseDir = (path as NSString).deletingLastPathComponent
         let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
@@ -372,6 +386,8 @@ final class Engine: ObservableObject {
         case "remove": removeItem(asInt(d["i"]) ?? -1)
         case "move": moveItem(asInt(d["i"]) ?? -1, asInt(d["d"]) ?? 0)
         case "reorder": reorderItem(asInt(d["from"]) ?? -1, asInt(d["to"]) ?? -1)
+        case "removemany": removeItems((d["indices"] as? [Any] ?? []).compactMap { asInt($0) })
+        case "reordermany": reorderItems((d["from"] as? [Any] ?? []).compactMap { asInt($0) }, asInt(d["to"]) ?? -1, after: asBool(d["after"]) ?? false)
         case "clear": if mode != "idle" { stopAll() }; items = []; sel = 0; idx = -1
         case "setitem":
             guard let i = asInt(d["i"]), items.indices.contains(i) else { throw DollyError(tr("indice fuori range")) }
@@ -448,7 +464,7 @@ final class Engine: ObservableObject {
     private func stateData() -> Data { (try? JSONSerialization.data(withJSONObject: state())) ?? Data("{}".utf8) }
     private func publish() {
         let data = stateData()
-        do { let s = try JSONDecoder().decode(Snap.self, from: data); DispatchQueue.main.async { self.snap = s } }
+        do { let s = try JSONDecoder().decode(Snap.self, from: data); DispatchQueue.main.async { self.snap = s; if self.selection.contains(where: { $0 >= s.items.count }) { self.selection = self.selection.filter { $0 < s.items.count } } } }
         catch { log("stato non leggibile dall'interfaccia:", error) }
     }
     private func refreshPreview() {
@@ -464,6 +480,35 @@ final class Engine: ObservableObject {
         let f = NSTemporaryDirectory() + "dolly-\(getpid())-preview.jpg"
         do { try mpv.ipc([["screenshot-to-file", f, "window"]], timeout: 8); pvData = try Data(contentsOf: URL(fileURLWithPath: f)) } catch { pvData = nil }
         pvT = nowT(); return pvData
+    }
+
+    // MARK: selezione nella scaletta (thread principale)
+    /// Clic su una riga: semplice = solo quella; ⌘ = aggiunge/toglie; ⇧ = intervallo dall'ultima scelta (con ⌘ si aggiunge all'esistente).
+    func tapSelect(_ i: Int, command: Bool, shift: Bool) {
+        if shift, let a = selAnchor { let r = Set(min(a, i)...max(a, i)); selection = command ? selection.union(r) : r }
+        else if command { if selection.contains(i) { selection.remove(i) } else { selection.insert(i) }; selAnchor = i }
+        else { selection = [i]; selAnchor = i }
+    }
+    func selectAll() { selection = Set(snap.items.indices); selAnchor = snap.items.indices.first }
+    /// Comando su un elemento che, se fa parte di una selezione di più, vale per tutti i selezionati.
+    func sendItem(_ i: Int, _ f: [String: Any]) {
+        let targets = selection.contains(i) && selection.count > 1 ? selection.sorted() : [i]
+        for k in targets { var d = f; d["a"] = "setitem"; d["i"] = k; send(d) }
+    }
+    /// Toglie dalla scaletta gli elementi selezionati (o solo l'elemento i se non fa parte della selezione), dopo conferma.
+    func removeSelected(or i: Int? = nil) {
+        let t = i.map { selection.contains($0) ? selection.sorted() : [$0] } ?? selection.sorted()
+        guard !t.isEmpty else { return }
+        confirm(t.count == 1 ? tr("Togliere dalla scaletta?") : trf("Togliere %d elementi dalla scaletta?", t.count)) { self.selection = []; self.send(["a": "removemany", "indices": t]) }
+    }
+    /// Sposta di una posizione ogni elemento selezionato (restano distanziati come sono; quelli già in cima/in fondo restano fermi).
+    func moveSelection(_ dlt: Int) {
+        let n = snap.items.count; var now = Set<Int>()
+        for i in (dlt < 0 ? selection.sorted() : selection.sorted(by: >)) where (0..<n).contains(i) {
+            let t = i + dlt
+            if (0..<n).contains(t) && !now.contains(t) { send(["a": "move", "i": i, "d": dlt]); now.insert(t) } else { now.insert(i) }
+        }
+        selection = now; selAnchor = selection.min()
     }
 
     // MARK: ingressi pubblici (da qualunque thread)

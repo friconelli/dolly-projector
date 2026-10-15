@@ -296,10 +296,18 @@ struct ScalettaPanel: View {
                                         onGripEnd: { dy in
                                             if dragFrom != i { dragHome = rowFrames[i]?.midY ?? 0 }
                                             let to = dropRow(i, dy)
-                                            if to != i { engine.send(["a": "reorder", "from": i, "to": to]) }
+                                            if to != i {
+                                                if engine.selection.contains(i) && engine.selection.count > 1 {   // trascinando un elemento selezionato si sposta tutto il blocco
+                                                    let ch = engine.selection
+                                                    if let order = blockOrder(count: s.items.count, chosen: ch, to: to, after: to > i) {
+                                                        engine.send(["a": "reordermany", "from": ch.sorted(), "to": to, "after": to > i])
+                                                        engine.selection = Set(order.enumerated().filter { ch.contains($0.element) }.map { $0.offset })
+                                                    }
+                                                } else { engine.send(["a": "reorder", "from": i, "to": to]); engine.selection = [] }
+                                            }
                                             dragFrom = nil; dragTo = nil; dragDY = 0 })
                                     .background(GeometryReader { g in Color.clear.preference(key: RowFramesKey.self, value: [i: g.frame(in: .named("scaletta"))]) })
-                                    .opacity(dragFrom == i ? 0.55 : 1).offset(y: dragFrom == i ? dragDY : 0).zIndex(dragFrom == i ? 1 : 0)
+                                    .opacity(dragFrom == i || (dragFrom != nil && engine.selection.count > 1 && engine.selection.contains(i) && engine.selection.contains(dragFrom!)) ? 0.55 : 1).offset(y: dragFrom == i ? dragDY : 0).zIndex(dragFrom == i ? 1 : 0)
                                     .overlay(alignment: dragFrom != nil && (dragTo ?? 0) > (dragFrom ?? 0) ? .bottom : .top) {   // dove cadrà
                                         if let f = dragFrom, dragTo == i, f != i { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6) }
                                         else if fileAt == i { Capsule().fill(Color.accentColor).frame(height: 3).padding(.horizontal, 6) } }
@@ -311,6 +319,7 @@ struct ScalettaPanel: View {
                         .coordinateSpace(name: "scaletta")
                         .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
                         .contentShape(Rectangle())
+                        .onTapGesture { engine.selection = [] }
                         .onDrop(of: [.fileURL], delegate: FinderDrop(engine: engine, insertion: { insertionIndex(at: $0, frames: rowFrames, count: s.items.count) }, at: $fileAt))
                     }
                 }
@@ -356,6 +365,7 @@ struct ItemRow: View {
     @State private var hover = false
     var body: some View {
         let cur = (s.mode == "playing" || s.mode == "wait") && s.idx == i, nxt = (s.mode == "gap" && s.next == i) || (s.mode == "idle" && s.sel == i)
+        let chosen = engine.selection.contains(i), multi = chosen && engine.selection.count > 1
         HStack(spacing: 10) {
             ZStack {
                 GripHandle(onMove: onGrip, onEnd: onGripEnd)
@@ -375,15 +385,24 @@ struct ItemRow: View {
                 .popover(isPresented: Binding(get: { gear == i }, set: { if !$0 && gear == i { gear = nil } }), arrowEdge: .trailing) { ItemSettings(engine: engine, i: i, it: it).frame(width: 340) }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(cur ? cueRed.opacity(0.10) : (hover ? Color.primary.opacity(0.05) : .clear)))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(nxt ? Color.orange.opacity(0.7) : .clear, lineWidth: 1.2))
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(chosen ? Color.accentColor.opacity(0.20) : cur ? cueRed.opacity(0.10) : (hover ? Color.primary.opacity(0.05) : .clear)))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(chosen ? Color.accentColor.opacity(0.75) : nxt ? Color.orange.opacity(0.7) : .clear, lineWidth: 1.2))
         .onHover { hover = $0 }
         .onTapGesture(count: 2) { play() }
+        .onTapGesture { let m = NSEvent.modifierFlags; engine.tapSelect(i, command: m.contains(.command), shift: m.contains(.shift)) }
         .contextMenu {
+            if !chosen { Button(tr("Seleziona")) { engine.tapSelect(i, command: false, shift: false) } }
             Button(tr("Avvia")) { play() }; Button(tr("Impostazioni…")) { gear = i }; Divider()
-            Button(tr("Sposta su")) { engine.send(["a": "move", "i": i, "d": -1]) }.disabled(i == 0)
-            Button(tr("Sposta giù")) { engine.send(["a": "move", "i": i, "d": 1]) }.disabled(i == s.items.count - 1)
-            Divider(); Button(tr("Rimuovi dalla scaletta")) { confirm(tr("Togliere dalla scaletta?")) { engine.send(["a": "remove", "i": i]) } }
+            if multi {
+                Button(tr("Sposta su")) { engine.moveSelection(-1) }; Button(tr("Sposta giù")) { engine.moveSelection(1) }
+                Button(tr("Seleziona tutto")) { engine.selectAll() }
+                Divider(); Button(trf("Rimuovi %d elementi dalla scaletta", engine.selection.count)) { engine.removeSelected() }
+            } else {
+                Button(tr("Sposta su")) { engine.send(["a": "move", "i": i, "d": -1]); engine.selection = [] }.disabled(i == 0)
+                Button(tr("Sposta giù")) { engine.send(["a": "move", "i": i, "d": 1]); engine.selection = [] }.disabled(i == s.items.count - 1)
+                Button(tr("Seleziona tutto")) { engine.selectAll() }
+                Divider(); Button(tr("Rimuovi dalla scaletta")) { engine.removeSelected(or: i) }
+            }
         }
     }
     var icon: String { it.kind == "pausa" ? "cup.and.saucer" : it.kind == "nero" ? "moon.zzz" : "film" }
@@ -411,9 +430,9 @@ struct BgControls: View {
             HStack { FieldLabel(tr("Sfondo"))
                 Text((it.bg ?? "").isEmpty ? tr("nero") : ((it.bg ?? "") as NSString).lastPathComponent).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
                 Spacer()
-                Button(tr("Scegli…")) { if let p = pickFiles(types: ["jpg", "jpeg", "png", "heic", "gif", "mp4", "mov", "mkv", "m4v"], multiple: false, prompt: tr("Immagine o video per lo sfondo dell'intervallo")).first { engine.send(["a": "setitem", "i": i, "bg": p]) } }.controlSize(.small)
-                if !(it.bg ?? "").isEmpty { Button(tr("Togli")) { engine.send(["a": "setitem", "i": i, "bg": ""]) }.controlSize(.small) } }
-            if !(it.bg ?? "").isEmpty { Toggle(tr("Audio dello sfondo"), isOn: Binding(get: { it.bgaudio ?? false }, set: { engine.send(["a": "setitem", "i": i, "bgaudio": $0]) })).toggleStyle(.switch).controlSize(.small) }
+                Button(tr("Scegli…")) { if let p = pickFiles(types: ["jpg", "jpeg", "png", "heic", "gif", "mp4", "mov", "mkv", "m4v"], multiple: false, prompt: tr("Immagine o video per lo sfondo dell'intervallo")).first { engine.sendItem(i, ["bg": p]) } }.controlSize(.small)
+                if !(it.bg ?? "").isEmpty { Button(tr("Togli")) { engine.sendItem(i, ["bg": ""]) }.controlSize(.small) } }
+            if !(it.bg ?? "").isEmpty { Toggle(tr("Audio dello sfondo"), isOn: Binding(get: { it.bgaudio ?? false }, set: { engine.sendItem(i, ["bgaudio": $0]) })).toggleStyle(.switch).controlSize(.small) }
             HStack { FieldLabel(tr("Preset"))
                 Menu(tr("Applica…")) {
                     ForEach(engine.snap.presets, id: \.name) { p in Button(p.name) { engine.send(["a": "preset_apply", "i": i, "name": p.name]) } }
@@ -435,33 +454,34 @@ struct ItemSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(it.label).font(.headline).lineLimit(1)
+            if engine.selection.contains(i) && engine.selection.count > 1 { Text(trf("Le modifiche valgono per i %d elementi selezionati", engine.selection.count)).font(.caption).foregroundStyle(Color.accentColor) }
             if it.kind == "pausa" || it.kind == "nero" {
-                if it.kind == "pausa" { TextRow(label: tr("Testo"), value: it.text, placeholder: tr("Intervallo")) { engine.send(["a": "setitem", "i": i, "text": $0]) } }
-                OptField(label: tr("Durata (s)"), value: it.secs, placeholder: "") { engine.send(["a": "setitem", "i": i, "secs": $0]) }
+                if it.kind == "pausa" { TextRow(label: tr("Testo"), value: it.text, placeholder: tr("Intervallo")) { engine.sendItem(i, ["text": $0]) } }
+                OptField(label: tr("Durata (s)"), value: it.secs, placeholder: "") { engine.sendItem(i, ["secs": $0]) }
                 if it.kind == "pausa" { BgControls(engine: engine, i: i, it: it) }
             } else {
                 Group {
-                    OptField(label: tr("Nero prima (s)"), value: it.pre, placeholder: n(s.defpre)) { engine.send(["a": "setitem", "i": i, "pre": $0]) }
-                    OptField(label: tr("Nero dopo (s)"), value: it.post, placeholder: n(s.defpost)) { engine.send(["a": "setitem", "i": i, "post": $0]) }
-                    OptField(label: "Volume %", value: it.vol, placeholder: "invariato") { engine.send(["a": "setitem", "i": i, "vol": $0]) }
+                    OptField(label: tr("Nero prima (s)"), value: it.pre, placeholder: n(s.defpre)) { engine.sendItem(i, ["pre": $0]) }
+                    OptField(label: tr("Nero dopo (s)"), value: it.post, placeholder: n(s.defpost)) { engine.sendItem(i, ["post": $0]) }
+                    OptField(label: "Volume %", value: it.vol, placeholder: "invariato") { engine.sendItem(i, ["vol": $0]) }
                 }
                 Divider()
-                TextRow(label: tr("Audio (lingua)"), value: it.alang, placeholder: "ita,it") { engine.send(["a": "setitem", "i": i, "alang": $0]) }
-                TextRow(label: tr("Sott. (lingua)"), value: it.slang, placeholder: tr("es. ita")) { engine.send(["a": "setitem", "i": i, "slang": $0]) }
+                TextRow(label: tr("Audio (lingua)"), value: it.alang, placeholder: "ita,it") { engine.sendItem(i, ["alang": $0]) }
+                TextRow(label: tr("Sott. (lingua)"), value: it.slang, placeholder: tr("es. ita")) { engine.sendItem(i, ["slang": $0]) }
                 HStack { FieldLabel(tr("Sottotitoli"))
-                    Picker("", selection: Binding(get: { it.submode ?? "" }, set: { engine.send(["a": "setitem", "i": i, "submode": $0]) })) {
+                    Picker("", selection: Binding(get: { it.submode ?? "" }, set: { engine.sendItem(i, ["submode": $0]) })) {
                         Text(tr("Come la scena")).tag(""); Text(tr("Come nel file")).tag("file"); Text(tr("Nessuno")).tag("none"); Text(tr("Solo forzati")).tag("forced"); Text(tr("Completi")).tag("full") }.labelsHidden() }
                 Text(tr("Lingue: codici a 3 lettere separati da virgola (ita, eng, fre…). Se il film è in corso, la modifica vale subito.")).font(.caption).foregroundStyle(.secondary)
                 Divider()
                 HStack { FieldLabel(tr("Ripetizione"))
-                    Picker("", selection: Binding(get: { it.loop < 0 ? -1 : it.loop == 0 ? 0 : 1 }, set: { engine.send(["a": "setitem", "i": i, "loop": $0 == 1 ? 1 : $0]) })) {
+                    Picker("", selection: Binding(get: { it.loop < 0 ? -1 : it.loop == 0 ? 0 : 1 }, set: { engine.sendItem(i, ["loop": $0 == 1 ? 1 : $0]) })) {
                         Text(tr("Nessuna")).tag(0); Text(tr("Infinita")).tag(-1); Text(tr("Un numero di volte")).tag(1) }.labelsHidden() }
-                if it.loop > 0 { OptField(label: tr("Volte in più"), value: Double(it.loop), placeholder: "1") { engine.send(["a": "setitem", "i": i, "loop": Double($0) ?? 1]) } }
+                if it.loop > 0 { OptField(label: tr("Volte in più"), value: Double(it.loop), placeholder: "1") { engine.sendItem(i, ["loop": Double($0) ?? 1]) } }
                 Divider()
-                OptField(label: tr("Intervallo a (min)"), value: (it.split ?? 0) > 0 ? (it.split! / 6).rounded() / 10 : nil, placeholder: tr("nessuno")) { engine.send(["a": "setitem", "i": i, "split": (Double($0.replacingOccurrences(of: ",", with: ".")) ?? 0) * 60]) }
+                OptField(label: tr("Intervallo a (min)"), value: (it.split ?? 0) > 0 ? (it.split! / 6).rounded() / 10 : nil, placeholder: tr("nessuno")) { engine.sendItem(i, ["split": (Double($0.replacingOccurrences(of: ",", with: ".")) ?? 0) * 60]) }
                 if (it.split ?? 0) > 0 {
-                    OptField(label: tr("Durata (min)"), value: it.secs / 60, placeholder: "10") { engine.send(["a": "setitem", "i": i, "secs": max(1, Double($0.replacingOccurrences(of: ",", with: ".")) ?? 10) * 60]) }
-                    TextRow(label: tr("Testo"), value: it.text, placeholder: tr("Intervallo")) { engine.send(["a": "setitem", "i": i, "text": $0]) }
+                    OptField(label: tr("Durata (min)"), value: it.secs / 60, placeholder: "10") { engine.sendItem(i, ["secs": max(1, Double($0.replacingOccurrences(of: ",", with: ".")) ?? 10) * 60]) }
+                    TextRow(label: tr("Testo"), value: it.text, placeholder: tr("Intervallo")) { engine.sendItem(i, ["text": $0]) }
                     BgControls(engine: engine, i: i, it: it)
                 }
                 Text(tr("Il film si ferma al minuto indicato, la sala mostra testo e conto alla rovescia, poi riparte da lì.")).font(.caption).foregroundStyle(.secondary)
@@ -614,7 +634,7 @@ struct SceneTab: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         Card(title: tr("Cartella dei film"), symbol: "folder") {
-            HStack { Text((s.folder as NSString).lastPathComponent).lineLimit(1); Spacer(); Button(tr("Cambia…")) { appDelegate.changeFolder() }.help(tr("La scaletta riparte dai film della nuova cartella")) }
+            HStack { Text(s.folder.isEmpty ? tr("Nessuna cartella") : (s.folder as NSString).lastPathComponent).foregroundStyle(s.folder.isEmpty ? .secondary : .primary).lineLimit(1); Spacer(); Button(s.folder.isEmpty ? tr("Scegli…") : tr("Cambia…")) { appDelegate.changeFolder() }.help(tr("La scaletta riparte dai film della nuova cartella")) }
             Button(libOpen ? tr("Nascondi l'elenco") : tr("Mostra l'elenco dei film")) { libOpen.toggle() }.buttonStyle(.link)
             if libOpen {
                 ForEach(Array(s.lib.enumerated()), id: \.offset) { i, n in HStack { Text(n.noExt).lineLimit(1).font(.callout); Spacer(); IconButton(symbol: "plus.circle", help: tr("Aggiungi alla scaletta")) { engine.send(["a": "addlib", "i": i]) } } }

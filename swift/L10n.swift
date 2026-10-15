@@ -19,6 +19,11 @@ func tr(_ s: String) -> String { Lang.isEnglish ? (enStrings[s] ?? s) : s }
 func trf(_ s: String, _ args: CVarArg...) -> String { String(format: tr(s), arguments: args) }
 
 let enStrings: [String: String] = [
+    "Seleziona": "Select",
+    "Togliere %d elementi dalla scaletta?": "Remove %d items from the running order?",
+    "Rimuovi %d elementi dalla scaletta": "Remove %d items from the running order",
+    "Le modifiche valgono per i %d elementi selezionati": "Changes apply to the %d selected items",
+    "Nessuna cartella": "No folder",
     "DCP (cartella)…": "DCP (folder)…",
     "Scegli la cartella del DCP": "Choose the DCP folder",
     "DCP non valido: %@": "Invalid DCP: %@",
