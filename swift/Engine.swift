@@ -125,7 +125,15 @@ final class Engine: ObservableObject {
         langPending = it.kind == "film" && (!it.alang.isEmpty || !it.slang.isEmpty || sm == "forced" || sm == "full"); langTries = 0
         if start == 0 { loopFile = it.loop != 0 }   // un nuovo film parte con la sua ripetizione (nessuna, infinita o N volte); una ripresa dopo un blocco mantiene lo stato attuale
         cmds.append(["set_property", "loop-file", start == 0 ? (it.loop < 0 ? "inf" : it.loop > 0 ? String(it.loop) : "no") : (loopFile ? "inf" : "no")])
-        let ld: [Any] = start > 0 ? ["loadfile", it.path, "replace", -1, "start=\(start)"] : ["loadfile", it.path, "replace"]
+        var target = it.path, opts: [String] = []
+        if Dcp.isCPLPath(it.path) {   // DCP: lista di montaggio con video e audio di tutti i reel, più i sottotitoli di testo
+            do {
+                let d = try Dcp.prepare(cpl: it.path, cacheDir: home + "/dcp-cache"); target = d.edl
+                if let s = d.subs { opts.append("sub-files=%\(s.utf8.count)%\(s)") }
+            } catch { err = "\(error)"; log(err!); advance(i); return }
+        }
+        if start > 0 { opts.append("start=\(start)") }
+        let ld: [Any] = opts.isEmpty ? ["loadfile", target, "replace"] : ["loadfile", target, "replace", -1, opts.joined(separator: ",")]
         do { try mpv.ipc(cmds + [ld, ["set_property", "pause", false]]) } catch { log("loadfile:", error); return }
         mode = "playing"; idx = i; sel = i; loadedAt = nowT(); pos = start; dur = 0; err = nil
         if start == 0 { retries = 0 }
@@ -409,7 +417,7 @@ final class Engine: ObservableObject {
             "items": items.map { i -> [String: Any] in
                 ["kind": i.kind, "pre": i.pre as Any? ?? NSNull(), "post": i.post as Any? ?? NSNull(), "vol": i.vol as Any? ?? NSNull(), "alang": i.alang, "slang": i.slang,
                  "secs": i.secs, "text": i.text, "name": i.title, "ok": i.kind != "film" || FileManager.default.fileExists(atPath: i.path), "loop": i.loop, "split": i.split, "bg": i.bg, "bgaudio": i.bgaudio, "submode": i.submode as Any? ?? NSNull()] },
-            "presets": presets, "lib": videosIn(folder).map { ($0 as NSString).lastPathComponent }, "saved": savedLists(),
+            "presets": presets, "lib": videosIn(folder).map { Item(path: $0).title }, "saved": savedLists(),
             "playing": false, "pause": false, "time": 0.0, "dur": 0.0, "audio": [Any](), "sub": [Any](), "video": [Any](), "chapters": [Any](),
             "chapter": NSNull(), "ab": [NSNull(), NSNull()], "props": [String: Any](), "adevs": [Any](), "info": [String: Any]()]
         let extra = ["pause", "time-pos", "duration", "track-list", "chapter-list", "chapter", "ab-loop-a", "ab-loop-b", "video-params", "container-fps", "video-codec",

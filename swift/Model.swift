@@ -40,16 +40,26 @@ struct Item: Equatable {
         ["kind": kind, "path": path, "pre": pre as Any? ?? NSNull(), "post": post as Any? ?? NSNull(), "vol": vol as Any? ?? NSNull(),
          "alang": alang, "slang": slang, "secs": secs, "text": text, "loop": loop, "split": split, "bg": bg, "bgaudio": bgaudio, "submode": submode as Any? ?? NSNull()]
     }
-    var title: String { kind == "pausa" ? (text.isEmpty ? tr("Pausa") : text) : kind == "nero" ? trf("Nero (%@ s)", secs == secs.rounded() ? String(Int(secs)) : String(secs)) : (path as NSString).lastPathComponent }
+    var title: String { kind == "pausa" ? (text.isEmpty ? tr("Pausa") : text) : kind == "nero" ? trf("Nero (%@ s)", secs == secs.rounded() ? String(Int(secs)) : String(secs)) : (Dcp.isCPLPath(path) ? Dcp.title(path) + ".dcp" : (path as NSString).lastPathComponent) }
 }
 
+/// I film di un percorso: un file mp4/avi/mkv, un CPL di DCP, una cartella-DCP (un elemento per ogni versione del film) oppure una cartella di film (file e sottocartelle-DCP, in ordine di nome).
 func videosIn(_ path: String) -> [String] {
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return [] }
     if isDir.boolValue {
+        let dcp = Dcp.cpls(inFolder: path)
+        if !dcp.isEmpty { return dcp }
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []).sorted()
-        return names.filter { !$0.hasPrefix(".") && VIDEO_EXT.contains(($0 as NSString).pathExtension.lowercased()) }.map { (path as NSString).appendingPathComponent($0) }
+        var out: [String] = []
+        for n in names where !n.hasPrefix(".") {
+            let p = (path as NSString).appendingPathComponent(n); var d: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: p, isDirectory: &d) else { continue }
+            if d.boolValue { out += Dcp.cpls(inFolder: p) } else if VIDEO_EXT.contains((n as NSString).pathExtension.lowercased()) { out.append(p) }
+        }
+        return out
     }
+    if Dcp.isCPLPath(path) { return Dcp.sniffCPL(path) ? [path] : [] }
     return VIDEO_EXT.contains((path as NSString).pathExtension.lowercased()) ? [path] : []
 }
 

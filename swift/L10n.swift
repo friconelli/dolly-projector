@@ -19,6 +19,14 @@ func tr(_ s: String) -> String { Lang.isEnglish ? (enStrings[s] ?? s) : s }
 func trf(_ s: String, _ args: CVarArg...) -> String { String(format: tr(s), arguments: args) }
 
 let enStrings: [String: String] = [
+    "DCP (cartella)…": "DCP (folder)…",
+    "Scegli la cartella del DCP": "Choose the DCP folder",
+    "DCP non valido: %@": "Invalid DCP: %@",
+    "DCP incompleto: manca il file ASSETMAP": "Incomplete DCP: the ASSETMAP file is missing",
+    "DCP incompleto: manca il file %@": "Incomplete DCP: the file %@ is missing",
+    "DCP 3D: non supportato": "3D DCP: not supported",
+    "il DCP non contiene immagini": "the DCP contains no picture",
+    "il DCP è cifrato: serve una KDM e Dolly non può proiettarlo": "the DCP is encrypted: it needs a KDM and Dolly cannot play it",
     "Avvio del player…": "Starting the player…",
     "Scegli la cartella dei film dal menu Dolly Projector": "Choose the films folder from the Dolly Projector menu",
     "Proiezione": "Screening",

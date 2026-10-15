@@ -320,6 +320,7 @@ struct ScalettaPanel: View {
                 Menu {
                     Button(tr("Film (mp4, avi, mkv)…")) { let p = pickFiles(prompt: tr("Aggiungi film (mp4, avi, mkv)")); if !p.isEmpty { engine.send(["a": "add", "paths": p]) } }
                     Button(tr("Tutti i film di una cartella…")) { let p = pickFiles(folders: true, multiple: false, prompt: tr("Aggiungi tutti i film di una cartella")); if !p.isEmpty { engine.send(["a": "add", "paths": p]) } }
+                    Button(tr("DCP (cartella)…")) { let p = pickFiles(folders: true, multiple: false, prompt: tr("Scegli la cartella del DCP")); if !p.isEmpty { engine.send(["a": "add", "paths": p]) } }
                     Button(tr("Tutta la libreria")) { engine.send(["a": "addlib"]) }
                     Divider()
                     Button(tr("Nero (secondi)…")) { showBlack = true }
@@ -393,6 +394,7 @@ struct ItemRow: View {
         if let a = it.post { p.append(trf("nero dopo %d″", Int(a))) }
         if !it.alang.isEmpty || !it.slang.isEmpty { p.append((it.alang.isEmpty ? "—" : it.alang) + " → " + (it.slang.isEmpty ? "—" : it.slang)) }
         if let m = it.submode { p.append(["file": tr("sott. del file"), "none": tr("senza sott."), "forced": tr("sott. forzati"), "full": tr("sott. completi")][m] ?? "") }
+        if it.name.hasSuffix(".dcp") { p.append("DCP") }
         if let v = it.vol { p.append(trf("vol %d%%", Int(v))) }
         return p.joined(separator: " · ")
     }

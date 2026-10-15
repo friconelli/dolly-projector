@@ -713,8 +713,61 @@ def t_soak(minutes):
         if len(samples) > 3: check(samples[-1][0] < samples[1][0] * 1.6 + 30 and samples[-1][1] < samples[1][1] * 1.6 + 100, f"memoria stabile python/mpv MB: {samples[1]} → {samples[-1]}")
     finally: s.stop()
 
+def t_dcp():
+    """DCP (da DOLLY_DCP_DIR, creata con tools/make_test_dcp.py): cartella o CPL in scaletta, riproduzione di tutti i reel (video JPEG 2000 XYZ + audio 5.1), sottotitoli SMPTE e Interop, cifrato/incompleto/più CPL, libreria."""
+    import glob, re
+    root = os.environ.get("DOLLY_DCP_DIR")
+    if not root or not os.path.isdir(os.path.join(root, "smpte_2reel")): print("  (saltato: imposta DOLLY_DCP_DIR a una cartella creata da tools/make_test_dcp.py)"); return
+    def cpl_files(d): return sorted(f for f in glob.glob(os.path.join(root, d, "*.xml")) if "ASSETMAP" not in os.path.basename(f))
+    def srts(s): return sorted(glob.glob(os.path.join(s.home, "dcp-cache", "dcp-*.srt")))
+    s = Srv(MEDIA, files=[])
+    try:
+        s.act(a="add", paths=[os.path.join(root, "smpte_2reel")]); its = s.state()["items"]
+        check(len(its) == 1 and its[0]["name"] == "Dolly Test SMPTE.dcp" and its[0]["ok"], f"cartella DCP in scaletta con il titolo del CPL ({[i['name'] for i in its]})")
+        s.act(a="add", paths=[cpl_files("smpte_2reel")[0]]); check(len(s.state()["items"]) == 2, "anche il file CPL si può aggiungere"); s.act(a="remove", i=1)
+        s.act(a="play", i=0); st = s.wait(lambda x: x["mode"] == "playing" and x["playing"] and x["dur"] > 0, 15)
+        check(st is not None and 3.8 < st["dur"] < 4.2, f"durata = somma dei due reel ({st and st['dur']})")
+        check(st and "2000" in (st["info"]["vcodec"] or "") and len(st["audio"]) == 1, f"un video JPEG 2000 e un'audio ({st and st['info']['vcodec']}, {st and len(st['audio'])} audio)")
+        check(st and len(st["chapters"]) == 0, "nessun capitolo con i nomi dei file")
+        check(st and len(st["sub"]) == 1, f"sottotitoli di testo caricati ({st and [t['t'] for t in st['sub']]})")
+        s.act(a="seek", v=1.5, m="absolute"); st = s.wait(lambda x: x["mode"] == "playing" and x["time"] > 2.6, 8)
+        check(st is not None and st["restarts"] == 0, f"si attraversa il confine tra i reel senza riavvii (t={st and st['time']:.1f})")
+        check(s.wait(lambda x: x["mode"] == "idle", 8) is not None, "alla fine del secondo reel la scaletta finisce")
+        f = srts(s); txt = open(f[0], encoding="utf-8").read() if f else ""
+        check("00:00:01,000 --> 00:00:01,833\nUno SMPTE" in txt and "00:00:02,500 --> 00:00:03,500\nDue SMPTE" in txt, f"SRT SMPTE: tempi del secondo reel spostati di 2 s ({txt!r})")
+        # Interop (ASSETMAP senza .xml, sottotitoli in XML)
+        s.act(a="clear"); s.act(a="add", paths=[os.path.join(root, "interop_1reel")]); its = s.state()["items"]
+        check([i["name"] for i in its] == ["Dolly Test Interop.dcp"], f"DCP Interop riconosciuto ({[i['name'] for i in its]})")
+        s.act(a="play", i=0); st = s.wait(lambda x: x["mode"] == "playing" and x["playing"] and x["dur"] > 0, 15)
+        check(st is not None and 1.8 < st["dur"] < 2.2 and len(st["sub"]) == 1, f"Interop: durata e sottotitoli ({st and st['dur']})")
+        txt = "".join(open(f, encoding="utf-8").read() for f in srts(s))
+        check("00:00:01,500 --> 00:00:01,960\nCiao dal DCP Interop" in txt and "00:00:01,960 --> 00:00:01,996\nSeconda riga\ne terza" in txt, f"SRT Interop (1/250 di secondo, righe unite): {txt[-160:]!r}")
+        # più CPL nello stesso pacchetto
+        s.act(a="clear"); s.act(a="add", paths=[os.path.join(root, "multi_cpl")]); its = s.state()["items"]
+        check(sorted(i["name"] for i in its) == ["Versione Due.dcp", "Versione Uno.dcp"], f"un elemento per ogni CPL ({[i['name'] for i in its]})")
+        for n, d in (("Versione Uno.dcp", 2.0), ("Versione Due.dcp", 1.0)):
+            i = [x["name"] for x in s.state()["items"]].index(n); s.act(a="play", i=i); st = s.wait(lambda x: x["mode"] == "playing" and x["playing"] and x["dur"] > 0, 15)
+            check(st is not None and abs(st["dur"] - d) < .2, f"{n}: durata {st and st['dur']} (attesa {d})"); s.act(a="stop")
+        # cifrato e incompleto: errore chiaro, la serata non si blocca
+        for d, nome, parola in (("cifrato", "Cifrato", "cifrato"), ("incompleto", "Incompleto", "manca il file")):   # uno alla volta: dopo un errore la scaletta passa al successivo
+            s.act(a="clear"); s.act(a="add", paths=[os.path.join(root, d)]); its = s.state()["items"]
+            check([i["name"] for i in its] == [f"Dolly Test {nome}.dcp"], f"{d}: si può aggiungere ({[i['name'] for i in its]})")
+            s.act(a="play", i=0); st = s.wait(lambda x: x["err"] and parola in x["err"], 8)
+            check(st is not None and not st["playing"] and st["mode"] == "idle", f"{d}: avviso chiaro e niente proiezione ({st and st['err']})")
+            if d == "incompleto": check(st is not None and "manca_il_video.mxf" in st["err"], "dice quale file manca")
+        check(s.state()["restarts"] == 0, "nessun riavvio di mpv")
+    finally: s.stop()
+    # libreria: file e sottocartelle-DCP, in ordine di nome
+    lib = tempfile.mkdtemp(prefix="dolly-lib-"); shutil.copy(os.path.join(MEDIA, "01_a.mp4"), lib); os.symlink(os.path.join(root, "smpte_2reel"), os.path.join(lib, "pacchetto"))
+    s = Srv(lib)
+    try:
+        st = s.state(); check(st["lib"] == ["01_a.mp4", "Dolly Test SMPTE.dcp"], f"la libreria mostra anche i DCP ({st['lib']})")
+        s.act(a="clear"); s.act(a="addlib", i=1); check([i["name"] for i in s.state()["items"]] == ["Dolly Test SMPTE.dcp"], "aggiungi un DCP dalla libreria")
+        s.act(a="clear"); s.act(a="addlib"); check(len(s.state()["items"]) == 2, "tutta la libreria (film + DCP)")
+    finally: s.stop()
+
 TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "trascinamento_gui": t_trascinamento_gui, "trascinamento_logica": t_trascinamento_logica, "inglese": t_inglese, "trascina_file": t_trascina_file, "update": t_update,
-         "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film, "intervallofilm": t_intervallo_film, "sfondo": t_sfondo_preset}
+         "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film, "intervallofilm": t_intervallo_film, "sfondo": t_sfondo_preset, "dcp": t_dcp}
 
 def main():
     global MEDIA
