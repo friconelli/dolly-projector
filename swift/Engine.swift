@@ -513,11 +513,25 @@ final class Engine: ObservableObject {
 
     // MARK: ingressi pubblici (da qualunque thread)
     private var pubPending = false
-    private func schedulePublish() {   // trascinando uno slider arrivano decine di comandi: l'istantanea si aggiorna una volta ogni ~0,12 s
+    private func schedulePublish() {   // trascinando uno slider arrivano decine di comandi: l'istantanea si aggiorna una volta ogni ~0,05 s
         if pubPending { return }; pubPending = true
-        q.asyncAfter(deadline: .now() + 0.12) { self.pubPending = false; self.publish() }
+        q.asyncAfter(deadline: .now() + 0.05) { self.pubPending = false; self.publish() }
+    }
+    /// Mostra subito l'effetto di un comando semplice (l'interfaccia non aspetta il giro con mpv); l'istantanea vera lo conferma pochi ms dopo.
+    private func optimistic(_ d: [String: Any]) {
+        switch d["a"] as? String {
+        case "set": if let k = d["p"] as? String { snap.props[k] = .from(d["v"]) }
+        case "aid": if let v = asInt(d["v"]) { for i in snap.audio.indices { snap.audio[i].sel = snap.audio[i].id == v } }
+        case "sid": let v = asInt(d["v"]); for i in snap.sub.indices { snap.sub[i].sel = snap.sub[i].id == v }
+        case "defaults":
+            if let v = d["auto"] as? Bool { snap.auto = v }
+            if let v = d["loop"] as? Bool { snap.loop = v }
+            if let v = d["defsub"] as? String { snap.defsub = v }
+        default: break
+        }
     }
     func send(_ d: [String: Any], done: ((String?) -> Void)? = nil) {
+        if Thread.isMainThread { optimistic(d) } else { DispatchQueue.main.async { self.optimistic(d) } }
         q.async {
             var e: String?
             do { try self.act(d) } catch { e = "\(error)"; log(tr("errore comando"), d, error) }

@@ -63,7 +63,7 @@ struct PillToggle: View {
     var body: some View {
         Button { isOn.toggle() } label: {
             Label(label, systemImage: symbol).font(.system(size: 12, weight: .medium)).padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Capsule().fill(isOn ? Color.accentColor.opacity(0.9) : Color.primary.opacity(0.08))).foregroundStyle(isOn ? Color.white : Color.primary)
+                .contentShape(Capsule()).background(Capsule().fill(isOn ? Color.accentColor.opacity(0.9) : Color.primary.opacity(0.08))).foregroundStyle(isOn ? Color.white : Color.primary)
         }.buttonStyle(.plain).help(help)
     }
 }
@@ -595,6 +595,7 @@ struct Inspector: View {
                     Button { tab = i } label: {
                         VStack(spacing: 3) { Image(systemName: t.0).font(.system(size: 15)); Text(t.1).font(.system(size: 10, weight: .medium)) }
                             .frame(maxWidth: .infinity).padding(.vertical, 7).foregroundStyle(tab == i ? Color.accentColor : .secondary)
+                            .contentShape(Rectangle())
                             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tab == i ? Color.accentColor.opacity(0.12) : .clear))
                     }.buttonStyle(.plain)
                 }
