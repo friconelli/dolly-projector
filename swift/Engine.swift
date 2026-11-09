@@ -29,13 +29,15 @@ final class Engine: ObservableObject {
     private var previewOn = UserDefaults.standard.object(forKey: "preview") as? Bool ?? true
     private var langPending = false, langTries = 0   // scelta di audio/sottotitoli del film appena partito
     private var loopFile = false   // "ripeti questo film": vale solo per il film in corso, al successivo si azzera
+    private var fileSets: [String: [String: Any]] = [:]   // impostazioni ricordate per file (percorso -> tracce e sincronie): valgono in ogni scaletta e dopo un riavvio
+    static let fileProps: Set<String> = ["audio-delay", "sub-delay"]   // proprietà che appartengono al singolo file, non a tutta la sala
 
     init(folder: String, mpvBinary: String, extra: [String], windowed: Bool, screen: Int, autoresume: Bool, resetPlaylist: Bool = false) throws {
         self.folder = (folder as NSString).expandingTildeInPath
         home = Engine.homePath
         try FileManager.default.createDirectory(atPath: home + "/playlists", withIntermediateDirectories: true)
         mpv = Mpv(binary: mpvBinary, extra: extra, windowed: windowed, screen: screen)
-        loadCurrent(); killOrphans(); presets = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: home + "/presets.json")))) as? [[String: Any]] ?? []
+        loadCurrent(); loadFileSets(); killOrphans(); presets = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: home + "/presets.json")))) as? [[String: Any]] ?? []
         if resetPlaylist { items = videosIn(self.folder).map { Item(path: $0) }; idx = -1; sel = 0; resume = nil }   // cartella cambiata: la scaletta riparte dai suoi film
         try mpv.start(); applyPrefs()
         if autoresume, let r = resume, let i = asInt(r["idx"]), i < items.count, nowT() - (asDouble(r["t"]) ?? 0) < 60 {   // riavvio dopo un arresto imprevisto, a proiezione in corso
@@ -62,12 +64,62 @@ final class Engine: ObservableObject {
     private func loadCurrent() {
         let d = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: cfile)))) as? [String: Any] ?? [:]
         name = asString(d["name"]) ?? tr("Scena"); defpre = asDouble(d["defpre"]) ?? 0; defpost = asDouble(d["defpost"]) ?? 0
-        auto = asBool(d["auto"]) ?? true; loop = asBool(d["loop"]) ?? false; prefs = (d["prefs"] as? [String: Any] ?? [:]).filter { $0.key != "loop-file" && $0.key != "speed" }
+        auto = asBool(d["auto"]) ?? true; loop = asBool(d["loop"]) ?? false; prefs = (d["prefs"] as? [String: Any] ?? [:]).filter { $0.key != "loop-file" && $0.key != "speed" && !Engine.fileProps.contains($0.key) }
         defsub = ["file", "none", "forced", "full"].contains(asString(d["defsub"]) ?? "") ? asString(d["defsub"])! : "file"
         resume = d["resume"] as? [String: Any]
         items = (d["items"] as? [[String: Any]] ?? []).map { Item(dict: $0) }
         if items.isEmpty { items = videosIn(folder).map { Item(path: $0) } }
     }
+    // MARK: impostazioni ricordate per file
+    private var fsFile: String { home + "/file-settings.json" }
+    private func loadFileSets() { fileSets = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: fsFile)))) as? [String: [String: Any]] ?? [:] }
+    private var curFilm: Item? { mode == "playing" && items.indices.contains(idx) && items[idx].kind == "film" ? items[idx] : nil }
+    /// Ricorda (o dimentica, con nil) un'impostazione di un file e scrive subito su disco.
+    private func remember(_ path: String, _ key: String, _ value: Any?) {
+        var e = fileSets[path] ?? [:]
+        if e[key] == nil && value == nil { return }
+        e[key] = value
+        fileSets[path] = e.isEmpty ? nil : e
+        writeJSON(fileSets, to: fsFile)
+    }
+    private func forgetTrack(_ path: String, _ a: String) { remember(path, a, nil); remember(path, a + "-label", nil) }
+    /// La traccia appena scelta a mano sul film in corso diventa quella del file.
+    private func rememberTrack(_ a: String, _ v: String, _ film: Item) {
+        if v == "auto" { forgetTrack(film.path, a); return }
+        guard v == "no" || Int(v) != nil else { return }
+        let tl = (try? mpv.get(["track-list"]))?["track-list"] as? [[String: Any]] ?? []
+        let t = tl.first { ($0["type"] as? String) == (a == "aid" ? "audio" : "sub") && asInt($0["id"]) == Int(v) }
+        remember(film.path, a, v == "no" ? "no" as Any : Int(v)! as Any)
+        remember(film.path, a + "-label", t.map(trackLabel) ?? (v == "no" ? nil : "\(v)"))
+    }
+    private func trackLabel(_ x: [String: Any]) -> String {
+        var parts: [String] = []
+        for k in ["lang", "title", "codec"] { if let s = asString(x[k]), !s.isEmpty { parts.append(s) } }
+        if let n = asInt(x["demux-channel-count"]), n > 0 { parts.append("\(n)ch") }
+        return parts.isEmpty ? trf("traccia %d", asInt(x["id"]) ?? 0) : parts.joined(separator: " · ")
+    }
+    /// Riassunto per la scaletta di ciò che il file ricorda.
+    private func fileMemo(_ path: String) -> String {
+        guard let e = fileSets[path] else { return "" }
+        var p: [String] = []
+        if e["aid"] != nil { p.append("audio: " + (asString(e["aid-label"]) ?? "?")) }
+        if let v = e["sid"] { p.append(tr("sott.") + ": " + (asString(v) == "no" ? tr("nessuno") : asString(e["sid-label"]) ?? "?")) }
+        if let v = asDouble(e["audio-delay"]) { p.append(trf("sincronia %@ s", String(format: "%+.2f", v))) }
+        if let v = asDouble(e["sub-delay"]) { p.append(trf("ritardo sott. %@ s", String(format: "%+.1f", v))) }
+        return p.joined(separator: " · ")
+    }
+    private func resetFile(_ i: Int) {
+        guard items.indices.contains(i), items[i].kind == "film" else { return }
+        let path = items[i].path
+        if fileSets.removeValue(forKey: path) != nil { writeJSON(fileSets, to: fsFile) }
+        items[i].alang = ""; items[i].slang = ""; items[i].submode = nil; items[i].vol = nil
+        guard let f = curFilm, f.path == path else { return }
+        let sm = subMode(f)
+        _ = try? mpv.ipc([["set_property", "alang", f.alang.isEmpty ? "ita,it,eng,en" : f.alang], ["set_property", "slang", f.slang], ["set_property", "aid", "auto"], ["set_property", "sid", sm == "none" ? "no" : "auto"],
+                          ["set_property", "audio-delay", 0], ["set_property", "sub-delay", 0]])   // vale subito sul film in corso
+        langPending = true; langTries = 0
+    }
+
     private func plPath(_ n: String) -> String {
         let ok = n.filter { $0.isLetter || $0.isNumber || " -_()".contains($0) }.trimmingCharacters(in: .whitespaces)
         return home + "/playlists/" + ok + ".json"
@@ -124,10 +176,14 @@ final class Engine: ObservableObject {
         var cmds: [[Any]] = [["set_property", "alang", it.alang.isEmpty ? "ita,it,eng,en" : it.alang], ["set_property", "slang", it.slang], ["set_property", "sid", sm == "none" ? "no" : "auto"],
                              ["set_property", "aid", "auto"], ["set_property", "vid", "auto"]]   // le scelte fatte su un film (traccia audio, "nero immagine") non devono passare al successivo
         if let v = it.vol { cmds.append(["set_property", "volume", v]); prefs["volume"] = v }
-        langPending = it.kind == "film" && (!it.alang.isEmpty || !it.slang.isEmpty || sm == "forced" || sm == "full"); langTries = 0
+        let fs = fileSets[it.path] ?? [:]   // ciò che questo file ricorda: le tracce entrano con il caricamento, così non si sente né si vede quella sbagliata nemmeno per un attimo
+        for p in Engine.fileProps.sorted() { cmds.append(["set_property", p, asDouble(fs[p]) ?? 0]) }
+        if asInt(fs["sid"]) != nil { cmds.append(["set_property", "sub-visibility", true]) }
+        langPending = it.kind == "film" && (!it.alang.isEmpty || !it.slang.isEmpty || sm == "forced" || sm == "full" || fs["aid"] != nil || fs["sid"] != nil); langTries = 0
         if start == 0 { loopFile = it.loop != 0 }   // un nuovo film parte con la sua ripetizione (nessuna, infinita o N volte); una ripresa dopo un blocco mantiene lo stato attuale
         cmds.append(["set_property", "loop-file", start == 0 ? (it.loop < 0 ? "inf" : it.loop > 0 ? String(it.loop) : "no") : (loopFile ? "inf" : "no")])
         var target = it.path, opts: [String] = []
+        for a in ["aid", "sid"] { if let v = fs[a].flatMap({ asString($0) }) { opts.append("\(a)=\(v)") } }
         if Dcp.isCPLPath(it.path) {   // DCP: lista di montaggio con video e audio di tutti i reel, più i sottotitoli di testo
             do {
                 let d = try Dcp.prepare(cpl: it.path, cacheDir: home + "/dcp-cache"); target = d.edl
@@ -233,10 +289,19 @@ final class Engine: ObservableObject {
         var cmds: [[Any]] = []
         let audios = tl.filter { $0["type"] as? String == "audio" }
         var audioLang = asString(audios.first { asBool($0["selected"]) ?? false }?["lang"]) ?? ""
-        let wantA = it.alang.split(separator: ",").map(String.init)
-        outer: for w in wantA { for tr in audios { if langMatch(asString(tr["lang"]) ?? "", w), let id = asInt(tr["id"]) { cmds.append(["set_property", "aid", id]); audioLang = asString(tr["lang"]) ?? audioLang; break outer } } }
-        let mode = subMode(it)
         let subs = tl.filter { $0["type"] as? String == "sub" }
+        // una traccia scelta a mano vale più delle lingue; se nel file non esiste più (file sostituito) si dimentica e decide la regola normale
+        var keepA = false, keepS = false, stale = false
+        if let id = asInt(fileSets[it.path]?["aid"]) {
+            if audios.contains(where: { asInt($0["id"]) == id }) { keepA = true } else { forgetTrack(it.path, "aid"); stale = true }
+        }
+        if let v = fileSets[it.path]?["sid"] {
+            if asString(v) == "no" || subs.contains(where: { asInt($0["id"]) == asInt(v) }) { keepS = true } else { forgetTrack(it.path, "sid"); stale = true }
+        }
+        if stale { load(idx, start: pos > 1 ? pos : 0); return }   // mpv è partito senza quella traccia e "auto" a film aperto non la riassegna: si ricarica, ora senza la scelta non valida
+        let wantA = keepA ? [] : it.alang.split(separator: ",").map(String.init)
+        outer: for w in wantA { for tr in audios { if langMatch(asString(tr["lang"]) ?? "", w), let id = asInt(tr["id"]) { cmds.append(["set_property", "aid", id]); audioLang = asString(tr["lang"]) ?? audioLang; break outer } } }
+        let mode = keepS ? "keep" : subMode(it)
         var wantS = it.slang.split(separator: ",").map(String.init)
         if wantS.isEmpty && (mode == "forced" || mode == "full") && !audioLang.isEmpty { wantS = [audioLang] }
         func pick(_ pool: [[String: Any]]) -> Int? {
@@ -244,6 +309,7 @@ final class Engine: ObservableObject {
             return nil
         }
         switch mode {
+        case "keep": break
         case "none": cmds.append(["set_property", "sid", "no"])
         case "forced":
             if let id = pick(subs.filter { isForced($0) }) ?? subs.first(where: { isForced($0) }).flatMap({ asInt($0["id"]) }) { cmds.append(["set_property", "sid", id]); cmds.append(["set_property", "sub-visibility", true]) }
@@ -282,6 +348,11 @@ final class Engine: ObservableObject {
         if p.hasSuffix("color"), (val as! String).range(of: "^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$", options: .regularExpression) == nil { throw DollyError(trf("colore non valido: %@", "\(val)")) }
         if p == "sub-ass-override", !["no", "yes", "scale", "force", "strip"].contains(val as! String) { throw DollyError(trf("valore non valido: %@", "\(val)")) }
         if p == "loop-file" { loopFile = (val as? String) != "no"; try mpv.ipc([["set_property", p, val]]); return }
+        if Engine.fileProps.contains(p) {   // sincronie: appartengono al film in corso, non passano al successivo
+            try mpv.ipc([["set_property", p, val]])
+            if let f = curFilm { remember(f.path, p, abs(val as! Double) < 0.0005 ? nil : val) }
+            return
+        }
         prefs[p] = val; try mpv.ipc([["set_property", p, val]])
     }
     private func removeItem(_ i: Int) {
@@ -356,6 +427,7 @@ final class Engine: ObservableObject {
         case "aid", "sid", "vid":
             let v = asString(d["v"]) ?? "no"
             try mpv.ipc([["set_property", a, (v == "no" || v == "auto") ? v : (Int(v) ?? 0)]])
+            if a != "vid", let f = curFilm { rememberTrack(a, v, f) }   // da qui in poi il file riparte sempre con questa traccia
         case "set": try setProp(d["p"] as? String ?? "", d["v"])
         case "resetsubstyle":   // torna allo stile iniziale e dimentica quello salvato
             for (p, v) in Engine.subStyleDefaults { prefs.removeValue(forKey: p); try mpv.ipc([["set_property", p, v]]) }
@@ -391,6 +463,13 @@ final class Engine: ObservableObject {
         case "clear": if mode != "idle" { stopAll() }; items = []; sel = 0; idx = -1
         case "setitem":
             guard let i = asInt(d["i"]), items.indices.contains(i) else { throw DollyError(tr("indice fuori range")) }
+            let before = items[i]
+            defer {   // cambiare lingua o modo è una scelta più recente della traccia ricordata: altrimenti non avrebbe effetto
+                if items.indices.contains(i), items[i].kind == "film" {
+                    if items[i].alang != before.alang { forgetTrack(items[i].path, "aid") }
+                    if items[i].slang != before.slang || items[i].submode != before.submode { forgetTrack(items[i].path, "sid") }
+                }
+            }
             if d.keys.contains("pre") { items[i].pre = try optNum(d["pre"]) }
             if d.keys.contains("post") { items[i].post = try optNum(d["post"]) }
             if d.keys.contains("vol") { items[i].vol = try optNum(d["vol"]) }
@@ -403,6 +482,7 @@ final class Engine: ObservableObject {
                 if i == idx && mode == "playing" { langPending = true; langTries = 0 } }
             if (d.keys.contains("alang") || d.keys.contains("slang")) && i == idx && mode == "playing" { langPending = true; langTries = 0 }   // vale subito sul film in corso
             for k in ["alang", "slang", "text"] { if let v = d[k] { let s = String((asString(v) ?? "").prefix(100)); switch k { case "alang": items[i].alang = s; case "slang": items[i].slang = s; default: items[i].text = s } } }
+        case "resetfile": resetFile(asInt(d["i"]) ?? -1)
         case "preset_save":   // salva lo sfondo/testo/durata dell'elemento i come preset (stesso nome = sostituisce)
             guard let i = asInt(d["i"]), items.indices.contains(i), let n = asString(d["name"]), !n.isEmpty else { throw DollyError(tr("indice fuori range")) }
             let it = items[i]; presets.removeAll { asString($0["name"]) == n }
@@ -432,7 +512,8 @@ final class Engine: ObservableObject {
             "auto": auto, "loop": loop, "defsub": defsub, "pid": Int(mpv.proc?.processIdentifier ?? 0), "defpre": defpre, "defpost": defpost, "resume": resume as Any? ?? NSNull(), "folder": folder,
             "items": items.map { i -> [String: Any] in
                 ["kind": i.kind, "pre": i.pre as Any? ?? NSNull(), "post": i.post as Any? ?? NSNull(), "vol": i.vol as Any? ?? NSNull(), "alang": i.alang, "slang": i.slang,
-                 "secs": i.secs, "text": i.text, "name": i.title, "ok": i.kind != "film" || FileManager.default.fileExists(atPath: i.path), "loop": i.loop, "split": i.split, "bg": i.bg, "bgaudio": i.bgaudio, "submode": i.submode as Any? ?? NSNull()] },
+                 "secs": i.secs, "text": i.text, "name": i.title, "ok": i.kind != "film" || FileManager.default.fileExists(atPath: i.path), "loop": i.loop, "split": i.split, "bg": i.bg, "bgaudio": i.bgaudio, "submode": i.submode as Any? ?? NSNull(),
+                 "custom": i.kind == "film" && (fileSets[i.path] != nil || !i.alang.isEmpty || !i.slang.isEmpty || i.submode != nil || i.vol != nil), "memo": fileMemo(i.path)] },
             "presets": presets, "lib": videosIn(folder).map { Item(path: $0).title }, "saved": savedLists(),
             "playing": false, "pause": false, "time": 0.0, "dur": 0.0, "audio": [Any](), "sub": [Any](), "video": [Any](), "chapters": [Any](),
             "chapter": NSNull(), "ab": [NSNull(), NSNull()], "props": [String: Any](), "adevs": [Any](), "info": [String: Any]()]
@@ -443,11 +524,7 @@ final class Engine: ObservableObject {
         let tl = r["track-list"] as? [[String: Any]] ?? []
         func tr(_ type: String) -> [[String: Any]] {
             tl.filter { $0["type"] as? String == type }.map { x in
-                var parts: [String] = []
-                for k in ["lang", "title", "codec"] { if let s = asString(x[k]), !s.isEmpty { parts.append(s) } }
-                if let n = asInt(x["demux-channel-count"]), n > 0 { parts.append("\(n)ch") }
-                let id = asInt(x["id"]) ?? 0
-                return ["id": id, "t": parts.isEmpty ? trf("traccia %d", id) : parts.joined(separator: " · "), "sel": asBool(x["selected"]) ?? false]
+                ["id": asInt(x["id"]) ?? 0, "t": trackLabel(x), "sel": asBool(x["selected"]) ?? false]
             }
         }
         let vp = r["video-params"] as? [String: Any] ?? [:]
@@ -500,6 +577,11 @@ final class Engine: ObservableObject {
         let t = i.map { selection.contains($0) ? selection.sorted() : [$0] } ?? selection.sorted()
         guard !t.isEmpty else { return }
         confirm(t.count == 1 ? tr("Togliere dalla scaletta?") : trf("Togliere %d elementi dalla scaletta?", t.count)) { self.selection = []; self.send(["a": "removemany", "indices": t]) }
+    }
+    /// Ripristina le impostazioni del file i (e degli altri selezionati, se fa parte della selezione), dopo conferma.
+    func resetFileSettings(_ i: Int) {
+        let t = selection.contains(i) && selection.count > 1 ? selection.sorted() : [i]
+        confirm(tr("Ripristinare le impostazioni di questo file? Tornano quelle predefinite: tracce audio e sottotitoli, lingue, sincronia e volume. Neri, ripetizione e intervallo non cambiano."), ok: tr("Ripristina")) { for k in t { self.send(["a": "resetfile", "i": k]) } }
     }
     /// Sposta di una posizione ogni elemento selezionato (restano distanziati come sono; quelli già in cima/in fondo restano fermi).
     func moveSelection(_ dlt: Int) {

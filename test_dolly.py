@@ -401,6 +401,38 @@ def t_prevloop():
         check(s.state()["restarts"] == 0, "nessun riavvio")
     finally: s.stop()
 
+def t_file_settings():
+    """Tracce e sincronie scelte su un file restano al file: rilancio della scaletta, altre scalette, riavvio dell'app; tasto di ripristino."""
+    s = Srv(MEDIA, files=["02_b.mkv", "01_a.mp4"])
+    fs = os.path.join(s.home, "file-settings.json")
+    def go(i, cond=lambda x: x["audio"] and x["sub"]):
+        s.act(a="play", i=i); st = s.wait(lambda x: x["mode"] == "playing" and x["idx"] == i and x["time"] > .4 and cond(x), 10); time.sleep(.5); return s.state()
+    def sels(st): return [t["sel"] for t in st["audio"]], [t["sel"] for t in st["sub"]]
+    try:
+        st = go(0); da, ds = sels(st); ida, ids = st["audio"][1]["id"], st["sub"][1]["id"]
+        check(da[0] and ds[0] and st["items"][0]["custom"] is False, "all'inizio: tracce predefinite, niente da ripristinare")
+        s.act(a="aid", v=ida); s.act(a="sid", v=str(ids)); s.act(a="set", p="audio-delay", v=.3); time.sleep(.4); st = s.state()
+        check(st["items"][0]["custom"] is True and "audio:" in st["items"][0]["memo"], f"la scaletta mostra le scelte ({st['items'][0]['memo']})")
+        st = go(1, lambda x: x["audio"]); check(abs(st["props"]["audio-delay"]) < .01, "la sincronia non passa al film successivo"); check(st["items"][1]["custom"] is False, "l'altro film non eredita nulla")
+        st = go(0); a, b = sels(st); check(a == [False, True] and b[1] and abs(st["props"]["audio-delay"] - .3) < .01, f"rilanciando il film le scelte ci sono ancora ({a} {b})")
+        s.act(a="stop"); st = go(0); a, b = sels(st); check(a[1] and b[1], "anche dopo stop e nuovo avvio")
+        s.act(a="seek", v=2, m="absolute"); s.act(a="stop"); s.act(a="clear"); s.act(a="add", paths=[os.path.join(MEDIA, "01_a.mp4"), os.path.join(MEDIA, "02_b.mkv")])
+        st = go(1); a, b = sels(st); check(a[1] and b[1], "lo stesso file in un'altra scaletta e in un'altra posizione")
+        s.act(a="stop"); s.stop(); s.start(); st = go(1); a, b = sels(st); check(a[1] and b[1], "dopo aver chiuso e riaperto l'app")
+        s.act(a="sid", v="no"); time.sleep(.3); st = go(1); a, b = sels(st); check(not any(b) and a[1], "anche la scelta \u00abnessun sottotitolo\u00bb viene ricordata")
+        s.act(a="resetfile", i=1); time.sleep(.8); a, b = sels(s.state()); check(a == da and b == ds, f"ripristino dopo la sola scelta delle tracce ({a} {b})")
+        s.act(a="aid", v=ida); s.act(a="sid", v="no"); time.sleep(.3)
+        s.act(a="setitem", i=1, slang="eng"); st = s.wait(lambda x: any(t["sel"] for t in x["sub"]), 3); check(st is not None and st["sub"][1]["sel"], "cambiare la lingua dei sottotitoli sostituisce la traccia ricordata")
+        s.act(a="setitem", i=1, vol=55, submode="full"); s.act(a="resetfile", i=1); time.sleep(1.0); st = s.state(); a, b = sels(st); it = st["items"][1]
+        check(a == da and b == ds, f"ripristino: tracce predefinite subito, a film in corso ({a} {b})"); check(abs(st["props"]["audio-delay"]) < .01, "ripristino: sincronia azzerata")
+        check(it["custom"] is False and it["memo"] == "" and it["vol"] is None and it["slang"] == "" and it["submode"] is None, "ripristino: niente più impostazioni sul file")
+        st = go(1); a, b = sels(st); check(a == da and b == ds, "dopo il ripristino il film riparte con le tracce predefinite")
+        s.act(a="setitem", i=1, split=30, loop=1); s.act(a="resetfile", i=1); st = s.state(); check(st["items"][1]["split"] == 30 and st["items"][1]["loop"] == 1, "il ripristino non tocca intervallo e ripetizione"); s.act(a="setitem", i=1, split=0, loop=0)
+        s.act(a="stop"); s.stop(); path = os.path.join(MEDIA, "02_b.mkv"); json.dump({path: {"aid": 99, "aid-label": "x", "sid": 98, "sid-label": "y"}}, open(fs, "w")); s.start()
+        st = go(1); a, b = sels(st); check(a == da and b == ds, f"traccia ricordata che non esiste più: si torna alle predefinite ({a} {b})"); check(st["items"][1]["custom"] is False, "e la scelta non valida viene dimenticata")
+        check(s.state()["restarts"] == 0, "nessun riavvio di mpv")
+    finally: s.stop()
+
 def t_lingue():
     """Lingua di audio/sottotitoli applicata anche a film già in corso, preferenza per la traccia completa su quella "forzata"; cambio cartella."""
     s = Srv(MEDIA, files=["02_b.mkv"])
@@ -423,8 +455,8 @@ def t_lingue():
     finally: s.stop()
 
 def t_reset_scelte():
-    """La traccia audio e il 'nero immagine' scelti su un film non passano al successivo."""
-    s = Srv(MEDIA, files=["02_b.mkv", "02_b.mkv"])
+    """La traccia audio e il 'nero immagine' scelti su un film non passano a un altro film."""
+    s = Srv(MEDIA, files=["02_b.mkv", "07_forzati.mkv"])
     try:
         s.act(a="play", i=0); s.wait(lambda x: x["mode"] == "playing" and x["time"] > .5 and x["audio"], 8)
         s.act(a="aid", v=2); s.act(a="vid", v="no"); time.sleep(.5); st = s.state()
@@ -808,7 +840,7 @@ def t_nofolder():
     finally: s.stop()
 
 TESTS = {"sequence": t_sequence, "gaps": t_gaps, "tracks": t_tracks, "failures": t_failures, "stress": t_stress, "crash": t_crash, "remote": t_remote, "trascinamento_gui": t_trascinamento_gui, "trascinamento_logica": t_trascinamento_logica, "inglese": t_inglese, "trascina_file": t_trascina_file, "update": t_update,
-         "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film, "intervallofilm": t_intervallo_film, "sfondo": t_sfondo_preset, "dcp": t_dcp, "multi": t_multi, "nofolder": t_nofolder}
+         "playlists": t_playlists, "modes": t_modes, "misc": t_misc, "orphan": t_orphan, "cinema": t_cinema, "subtitles": t_subtitles, "autoresume": t_autoresume, "prevloop": t_prevloop, "lingue": t_lingue, "file_settings": t_file_settings, "reset": t_reset_scelte, "sottotitoli": t_sottotitoli, "loopfilm": t_loop_film, "intervallofilm": t_intervallo_film, "sfondo": t_sfondo_preset, "dcp": t_dcp, "multi": t_multi, "nofolder": t_nofolder}
 
 def main():
     global MEDIA

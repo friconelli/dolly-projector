@@ -380,6 +380,7 @@ struct ItemRow: View {
                 if !caption.isEmpty { Text(caption).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer(minLength: 4)
+            if it.custom == true { IconButton(symbol: "arrow.counterclockwise", help: tr("Ripristina le impostazioni di questo file"), size: 14, tint: cueRed) { engine.resetFileSettings(i) } }
             if it.loop != 0 { Image(systemName: "repeat").font(.system(size: 11)).foregroundStyle(.secondary).help(it.loop < 0 ? tr("Si ripete all'infinito") : trf("Si ripete %d volte", it.loop)) }
             IconButton(symbol: "slider.horizontal.3", help: tr("Impostazioni di questo elemento")) { gear = gear == i ? nil : i }
                 .popover(isPresented: Binding(get: { gear == i }, set: { if !$0 && gear == i { gear = nil } }), arrowEdge: .trailing) { ItemSettings(engine: engine, i: i, it: it).frame(width: 340) }
@@ -392,7 +393,9 @@ struct ItemRow: View {
         .onTapGesture { let m = NSEvent.modifierFlags; engine.tapSelect(i, command: m.contains(.command), shift: m.contains(.shift)) }
         .contextMenu {
             if !chosen { Button(tr("Seleziona")) { engine.tapSelect(i, command: false, shift: false) } }
-            Button(tr("Avvia")) { play() }; Button(tr("Impostazioni…")) { gear = i }; Divider()
+            Button(tr("Avvia")) { play() }; Button(tr("Impostazioni…")) { gear = i }
+            if it.custom == true { Button(tr("Ripristina le impostazioni di questo file")) { engine.resetFileSettings(i) } }
+            Divider()
             if multi {
                 Button(tr("Sposta su")) { engine.moveSelection(-1) }; Button(tr("Sposta giù")) { engine.moveSelection(1) }
                 Button(tr("Seleziona tutto")) { engine.selectAll() }
@@ -415,6 +418,7 @@ struct ItemRow: View {
         if let m = it.submode { p.append(["file": tr("sott. del file"), "none": tr("senza sott."), "forced": tr("sott. forzati"), "full": tr("sott. completi")][m] ?? "") }
         if it.name.hasSuffix(".dcp") { p.append("DCP") }
         if let v = it.vol { p.append(trf("vol %d%%", Int(v))) }
+        if let m = it.memo, !m.isEmpty { p.append(m) }
         return p.joined(separator: " · ")
     }
     func play() { if s.mode == "idle" { engine.send(["a": "play", "i": i]) } else { confirm(tr("Cambiare? Quello in corso si interrompe.")) { engine.send(["a": "play", "i": i]) } } }
@@ -446,6 +450,19 @@ struct BgControls: View {
     }
 }
 
+/// Barra con ciò che il file ricorda e il tasto per ripristinarlo: nel riquadro dell'elemento e nelle schede Audio e Sottotitoli.
+struct FileResetBar: View {
+    @ObservedObject var engine: Engine
+    let i: Int; let it: ItemState
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(it.custom == true ? ((it.memo ?? "").isEmpty ? tr("Questo file ha impostazioni proprie") : it.memo!) : tr("Nessuna impostazione specifica per questo file")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            Button { engine.resetFileSettings(i) } label: { Label(tr("Ripristina impostazioni del file"), systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity) }
+                .buttonStyle(.borderedProminent).tint(.red).disabled(it.custom != true)
+        }
+    }
+}
+
 /// Impostazioni di un singolo elemento (riquadro a comparsa, niente accordion).
 struct ItemSettings: View {
     @ObservedObject var engine: Engine
@@ -460,6 +477,7 @@ struct ItemSettings: View {
                 OptField(label: tr("Durata (s)"), value: it.secs, placeholder: "") { engine.sendItem(i, ["secs": $0]) }
                 if it.kind == "pausa" { BgControls(engine: engine, i: i, it: it) }
             } else {
+                FileResetBar(engine: engine, i: i, it: it)
                 Group {
                     OptField(label: tr("Nero prima (s)"), value: it.pre, placeholder: n(s.defpre)) { engine.sendItem(i, ["pre": $0]) }
                     OptField(label: tr("Nero dopo (s)"), value: it.post, placeholder: n(s.defpost)) { engine.sendItem(i, ["post": $0]) }
@@ -648,6 +666,7 @@ struct AudioTab: View {
     @ObservedObject var engine: Engine
     var s: Snap { engine.snap }
     var body: some View {
+        if s.mode == "playing", s.items.indices.contains(s.idx), s.items[s.idx].kind == "film" { Card(title: s.items[s.idx].label, symbol: "film") { FileResetBar(engine: engine, i: s.idx, it: s.items[s.idx]) } }
         Card(title: tr("Uscita e tracce"), symbol: "speaker.wave.2") {
             HStack { FieldLabel(tr("Uscita"))
                 Picker("", selection: Binding(get: { s.s("audio-device") }, set: { engine.send(["a": "set", "p": "audio-device", "v": $0]) })) { ForEach(s.adevs, id: \.id) { Text($0.t).tag($0.id) } }.labelsHidden() }
@@ -665,6 +684,7 @@ struct SubsTab: View {
     @ObservedObject var engine: Engine
     var s: Snap { engine.snap }
     var body: some View {
+        if s.mode == "playing", s.items.indices.contains(s.idx), s.items[s.idx].kind == "film" { Card(title: s.items[s.idx].label, symbol: "film") { FileResetBar(engine: engine, i: s.idx, it: s.items[s.idx]) } }
         Card(title: tr("Traccia"), symbol: "captions.bubble") {
             HStack { FieldLabel(tr("Traccia"))
                 Picker("", selection: Binding(get: { s.sub.first { $0.sel }?.id ?? -1 }, set: { engine.send(["a": "sid", "v": $0 < 0 ? "no" : String($0)]) })) { Text(tr("Nessuno")).tag(-1); ForEach(s.sub) { Text($0.t).tag($0.id) } }.labelsHidden() }

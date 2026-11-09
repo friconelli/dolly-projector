@@ -68,7 +68,7 @@ struct Track: Decodable, Identifiable, Equatable { var id: Int; var t: String; v
 struct Chapter: Decodable, Equatable { var t: String; var s: Double }
 struct AudioDev: Decodable, Equatable { var id: String; var t: String }
 struct ItemState: Decodable, Equatable {
-    var kind: String; var pre: Double?; var post: Double?; var vol: Double?; var alang: String; var slang: String; var secs: Double; var text: String; var name: String; var ok: Bool; var loop: Int; var split: Double? ; var bg: String?; var bgaudio: Bool?; var submode: String?
+    var kind: String; var pre: Double?; var post: Double?; var vol: Double?; var alang: String; var slang: String; var secs: Double; var text: String; var name: String; var ok: Bool; var loop: Int; var split: Double? ; var bg: String?; var bgaudio: Bool?; var submode: String?; var custom: Bool?; var memo: String?   // custom: il file ha impostazioni proprie da poter ripristinare; memo: riassunto di quelle ricordate
     var label: String { kind == "film" ? (name as NSString).deletingPathExtension : name }   // i nomi di pausa/nero possono contenere un punto
 }
 struct Resume: Decodable, Equatable { var idx: Int; var pos: Double }
