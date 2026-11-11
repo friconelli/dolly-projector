@@ -629,6 +629,25 @@ def t_update():
         o = run({"version": "9.9.8", "url": url, "sha256": sha}); check("non contiene" in o.get("error", ""), "versione dell'archivio diversa da quella annunciata: rifiutato")
         z2, sha2 = make("9.9.9", bid="evil.app.xyz"); o = run({"version": "9.9.9", "url": f"http://127.0.0.1:{port}/{os.path.basename(z2)}", "sha256": sha2}); check("non contiene" in o.get("error", ""), "app con un altro identificativo: rifiutata")
         o = run({"version": "9.9.9", "url": "http://example.com/x.zip", "sha256": sha}, dl=False); check("non valida" in o.get("error", ""), "un indirizzo http non locale è rifiutato")
+        # rete instabile: il server taglia la connessione a metà e il download riprende con Range (anche con file più grande, senza SHA diverso)
+        big = os.path.join(d, "Dolly-big.zip"); z3, _ = make("9.9.7"); open(z3, "ab").write(os.urandom(600_000))   # zip valido + coda (ditto ignora i dati in coda? se no, il test controlla solo i byte)
+        sha3 = hashlib.sha256(open(z3, "rb").read()).hexdigest(); data3 = open(z3, "rb").read(); hits = []
+        class Flaky(http.server.BaseHTTPRequestHandler):
+            def log_message(s, *a): pass
+            def do_GET(s):
+                rng = s.headers.get("Range"); start = int(rng.split("=")[1].rstrip("-")) if rng else 0; hits.append(start)
+                body = data3[start:]; s.send_response(206 if rng else 200)
+                if rng: s.send_header("Content-Range", f"bytes {start}-{len(data3)-1}/{len(data3)}")
+                s.send_header("Content-Length", str(len(body))); s.end_headers()
+                cut = len(body) // 3 if len(hits) < 3 else len(body)   # le prime due richieste cadono a un terzo del resto
+                s.wfile.write(body[:cut]); s.wfile.flush()
+                if cut < len(body): s.connection.close()
+        f = http.server.ThreadingHTTPServer(("127.0.0.1", port + 1), Flaky); threading.Thread(target=f.serve_forever, daemon=True).start()
+        try:
+            o = run({"version": "9.9.7", "url": f"http://127.0.0.1:{port+1}/x.zip", "sha256": sha3, "bytes": len(data3)})
+            check(len(hits) >= 3 and hits[1] > 0 and hits[2] >= hits[1], f"download interrotto: riprende da dove era arrivato (partenze {hits})")
+            check(os.path.isdir(o.get("app", "") or "/nonexistent") or "archivio" in o.get("error", ""), f"dopo le riprese il file è completo e verificato ({str(o)[:120]})")
+        finally: f.shutdown()
     finally: h.shutdown()
 
 def t_trascina_file():

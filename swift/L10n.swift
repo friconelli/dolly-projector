@@ -313,5 +313,12 @@ let enStrings: [String: String] = [
     "download non riuscito": "download failed",
     "il file scaricato non corrisponde (SHA-256 diverso): aggiornamento annullato": "the downloaded file does not match (different SHA-256): update cancelled",
     "archivio non valido": "invalid archive",
+    "download non riuscito dopo %d tentativi (%@)": "download failed after %d attempts (%@)",
+    "il sito ha risposto con errore %d": "the site replied with error %d",
+    "connessione interrotta": "connection interrupted",
+    "%@ MB scaricati · %@ MB mancanti": "%@ MB downloaded · %@ MB remaining",
+    "%@ MB scaricati": "%@ MB downloaded",
+    "Connessione debole: nuovo tentativo %d tra %d s (riprende da dove era arrivato)": "Weak connection: retry %d in %d s (resumes where it stopped)",
+    "Tentativo %d: riprende da dove era arrivato": "Attempt %d: resuming where it stopped",
     "l'archivio non contiene Dolly Projector %@": "the archive does not contain Dolly Projector %@"
 ]

@@ -137,8 +137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // MARK: finestra, tastiera, menu
     func buildWindow() {
         let host = NSHostingView(rootView: HostView(model: model))
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 900), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false, screen: NSScreen.screens.first)
-        window.title = "Dolly Projector"; window.contentView = host; window.delegate = self; window.minSize = NSSize(width: 900, height: 600)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 900), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false, screen: NSScreen.screens.first)
+        window.title = "Dolly Projector"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true   // barra del titolo personalizzata: la disegna HeaderBar
+         window.contentView = host; window.delegate = self; window.minSize = NSSize(width: 900, height: 600)
         window.setFrameAutosaveName("DollyMain"); if !window.setFrameUsingName("DollyMain") { window.center() }
         window.makeKeyAndOrderFront(nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.window.makeFirstResponder(nil) }   // nessun campo di testo selezionato all'avvio: la tastiera comanda subito il player
@@ -233,7 +234,8 @@ final class SnapshotRunner {
     func run(play: Int?, wait: Double) {
         let host = NSHostingView(rootView: RootView(engine: engine))
         let sz = (argValue("--size") ?? "1320x1100").split(separator: "x").compactMap { Double($0) }
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: sz.count == 2 ? sz[0] : 1320, height: sz.count == 2 ? sz[1] : 1100), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: sz.count == 2 ? sz[0] : 1320, height: sz.count == 2 ? sz[1] : 1100), styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden
         window.contentView = host; window.orderBack(nil)
         if ProcessInfo.processInfo.environment["DOLLY_DARK"] == "1" { window.appearance = NSAppearance(named: .darkAqua) }   // per gli screenshot del sito
         if let p = play { _ = engine.actSync(["a": "play", "i": p]) }

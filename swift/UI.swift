@@ -90,6 +90,33 @@ struct TextRow: View {
         .onAppear { text = value }.onChange(of: value) { v in if !focus { text = v } }
     }
 }
+/// Slider disegnato a mano: la traccia è una capsula pulita (niente trattini dei passi come nello Slider nativo con `step`), il cursore segue il mouse al pixel e il valore si aggancia al passo.
+struct DollySlider: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>; var step: Double? = nil; var onEditing: (Bool) -> Void = { _ in }
+    @State private var hover = false
+    @State private var dragging = false
+    var body: some View {
+        GeometryReader { g in
+            let w = max(1, g.size.width - 14), span = max(1e-9, range.upperBound - range.lowerBound)
+            let frac = min(1, max(0, (value - range.lowerBound) / span)), x = 7 + w * frac
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.14)).frame(height: 4)
+                Capsule().fill(Color.accentColor).frame(width: x, height: 4)
+                Circle().fill(Color.white).overlay(Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.5)).shadow(color: .black.opacity(0.3), radius: 1.5, y: 0.5)
+                    .frame(width: dragging || hover ? 15 : 13, height: dragging || hover ? 15 : 13).offset(x: x - (dragging || hover ? 7.5 : 6.5))
+            }
+            .frame(maxHeight: .infinity).contentShape(Rectangle()).onHover { hover = $0 }
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { d in
+                    if !dragging { dragging = true; onEditing(true) }
+                    var v = range.lowerBound + span * Double(min(1, max(0, (d.location.x - 7) / w)))
+                    if let st = step, st > 0 { v = range.lowerBound + ((v - range.lowerBound) / st).rounded() * st }
+                    v = min(range.upperBound, max(range.lowerBound, v)); if v != value { value = v } }
+                .onEnded { _ in dragging = false; onEditing(false) })
+        }.frame(height: 20)
+    }
+}
 struct PropSlider: View {
     @ObservedObject var engine: Engine
     let prop: String; let label: String; let range: ClosedRange<Double>; var step = 1.0; var reset: Double? = nil; var fmtv: (Double) -> String = { String(format: "%.2f", $0) }
@@ -98,7 +125,7 @@ struct PropSlider: View {
         let cur = drag ?? engine.snap.d(prop, reset ?? range.lowerBound)
         HStack(spacing: 8) {
             FieldLabel(label)
-            Slider(value: Binding(get: { cur }, set: { drag = $0; engine.send(["a": "set", "p": prop, "v": $0]) }), in: range, step: step) { e in if !e { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { drag = nil } } }.controlSize(.small)
+            DollySlider(value: Binding(get: { cur }, set: { drag = $0; engine.send(["a": "set", "p": prop, "v": $0]) }), range: range, step: step) { e in if !e { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { drag = nil } } }
             Text(fmtv(cur)).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).frame(width: 54, alignment: .trailing)
             if let r = reset { IconButton(symbol: "arrow.counterclockwise", help: tr("Valore iniziale"), size: 11) { engine.send(["a": "set", "p": prop, "v": r]) } }
         }
@@ -140,7 +167,7 @@ struct RootView: View {
                 Inspector(engine: engine).frame(width: 360).background(.regularMaterial)
             }
         }
-        .frame(minWidth: 1240, minHeight: 720).background(Color(nsColor: .windowBackgroundColor))
+        .frame(minWidth: 1240, minHeight: 720).background(Color(nsColor: .windowBackgroundColor)).ignoresSafeArea(.container, edges: .top)
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in refreshLive() }
         .onAppear { refreshLive() }
         .onChange(of: engine.snap.pid) { _ in refreshLive() }
@@ -152,6 +179,15 @@ struct RootView: View {
     }
 }
 
+/// Zona che trascina la finestra (la barra del titolo di sistema non c'è più) e zoom con doppio clic.
+struct WindowDragArea: NSViewRepresentable {
+    final class V: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+        override func mouseDown(with e: NSEvent) { if e.clickCount == 2 { window?.performZoom(nil) } else { super.mouseDown(with: e) } }
+    }
+    func makeNSView(context: Context) -> NSView { V() }
+    func updateNSView(_ v: NSView, context: Context) {}
+}
 struct HeaderBar: View {
     @ObservedObject var engine: Engine
     var s: Snap { engine.snap }
@@ -168,7 +204,8 @@ struct HeaderBar: View {
             }
             HStack(spacing: 6) { Circle().fill(color).frame(width: 8, height: 8); Text(pill).font(.system(size: 12, weight: .semibold)) }
                 .padding(.horizontal, 12).padding(.vertical, 5).background(Capsule().fill(color.opacity(0.14))).foregroundStyle(color)
-        }.padding(.horizontal, 16).padding(.vertical, 10)
+        }.padding(.leading, 84).padding(.trailing, 16).padding(.vertical, 10).frame(minHeight: 52)   // 84 pt a sinistra: lasciano posto ai tre pulsanti della finestra
+        .background(WindowDragArea())
     }
     var title: String {
         switch s.mode {
@@ -595,7 +632,7 @@ struct VolumeSlider: View {
     var body: some View {
         let cur = drag ?? engine.snap.d("volume", 100)
         HStack(spacing: 6) {
-            Slider(value: Binding(get: { cur }, set: { drag = $0; engine.send(["a": "set", "p": "volume", "v": $0]) }), in: 0...130) { e in if !e { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { drag = nil } } }.controlSize(.small)
+            DollySlider(value: Binding(get: { cur }, set: { drag = $0; engine.send(["a": "set", "p": "volume", "v": $0]) }), range: 0...130, step: 1) { e in if !e { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { drag = nil } } }
             Text("\(Int(cur))").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).frame(width: 26, alignment: .trailing)
         }
     }
